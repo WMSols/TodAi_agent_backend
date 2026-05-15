@@ -1,0 +1,22 @@
+# --- Local sandbox (R&D agent — keep on disk, do not push) ---
+todai_sandbox/
+
+# --- Local dev, secrets, caches ---
+.venv/
+.env
+.env.local
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.tmp
+
+# --- Not part of backend repository init (local only) ---
+static/
+data/
+tests/
+docs/
+pytest.ini
+run_sandbox.py
+main_sandbox.py
+.env.example
