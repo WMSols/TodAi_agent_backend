@@ -38,23 +38,20 @@ py -3 -m venv .venv
 pip install -r requirements.txt
 ```
 
-## Run (backend API)
+## Run
 
 ```powershell
 py -3 main.py
 ```
 
-Health check: **http://127.0.0.1:8000/health**
+| Your machine | URL |
+|--------------|-----|
+| **Local** (`todai_sandbox/` exists) | **http://127.0.0.1:8000/** — sandbox UI + `/api/*` |
+| **GitHub clone** (no sandbox folder) | **http://127.0.0.1:8000/health** — backend API only |
 
-## Local sandbox (not in Git)
+Force backend-only locally: `$env:TODAI_BACKEND_ONLY = "1"; py -3 main.py`
 
-Phase-1 agent work lives in `todai_sandbox/` (gitignored). Run locally with:
-
-```powershell
-py -3 run_sandbox.py
-```
-
-Sandbox UI: **http://127.0.0.1:8010/** (requires `static/` and `data/` on disk — also gitignored).
+Alternate sandbox entry (same app, port 8010): `py -3 run_sandbox.py`
 
 ## What is pushed to GitHub
 
