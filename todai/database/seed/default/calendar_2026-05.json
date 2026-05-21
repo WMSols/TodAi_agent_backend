@@ -1,0 +1,27 @@
+{
+  "month": "2026-05",
+  "version": 1,
+  "blocks": [
+    {
+      "id": "blk_1",
+      "title": "Morning study",
+      "start": "2026-05-20T08:00:00",
+      "end": "2026-05-20T09:00:00",
+      "kind": "focus"
+    },
+    {
+      "id": "blk_2",
+      "title": "Team sync",
+      "start": "2026-05-21T14:00:00",
+      "end": "2026-05-21T15:00:00",
+      "kind": "meeting"
+    },
+    {
+      "id": "blk_3",
+      "title": "Gym",
+      "start": "2026-05-22T17:00:00",
+      "end": "2026-05-22T18:00:00",
+      "kind": "personal"
+    }
+  ]
+}

@@ -1,32 +1,25 @@
 # TodAI Backend
 
-Python **FastAPI** backend repository — architectural layout for API, AI Agent, Memory, and Database layers.
+Python **FastAPI** backend — API layer, AI agent, and file-backed storage.
 
 ## Repository layout
 
 ```
 todai/
-├── api/                    # API layer
+├── api/                    # HTTP routes, static UI, middleware
 │   ├── main.py             # FastAPI app entry
-│   ├── routes/
-│   ├── dependencies/
-│   ├── schemas/
+│   ├── service.py          # process_chat, debug state
+│   ├── static/index.html   # Chat + debug UI
 │   └── middleware/
-├── agent/                  # AI Agent Core
-│   ├── core/
-│   ├── planner/
-│   ├── tools/
-│   ├── routing/
-│   └── contracts/
-├── memory/                 # Memory System
-│   ├── stores/
-│   ├── context/
-│   └── session/
-└── database/               # Database Layer
-    ├── models/
-    ├── repositories/
-    ├── migrations/
-    └── session/
+├── agent/                  # AI agent
+│   ├── core/               # Turn orchestration, intents, display
+│   ├── planner/            # Groq router + specialist (llm, prompts)
+│   ├── routing/            # Intent routing, date scope, guards
+│   └── tools/              # Calendar read/write tools
+├── memory/                 # Reserved for future memory layers
+└── database/               # File storage, seeds, API models
+    ├── storage.py
+    └── seed/default/
 ```
 
 ## Setup
@@ -38,25 +31,42 @@ py -3 -m venv .venv
 pip install -r requirements.txt
 ```
 
+Copy `.env.example` to `.env` and set `GROQ_API_KEY` for live LLM routing (optional — mock mode works without it).
+
 ## Run
 
+From the **repo root** (`F:\TodAi`), not from inside `todai\api`:
+
 ```powershell
-py -3 main.py
+cd F:\TodAi
+.\.venv\Scripts\Activate.ps1
+python main.py
 ```
 
-| Your machine | URL |
-|--------------|-----|
-| **Local** (`todai_sandbox/` exists) | **http://127.0.0.1:8000/** — sandbox UI + `/api/*` |
-| **GitHub clone** (no sandbox folder) | **http://127.0.0.1:8000/health** — backend API only |
+Other ways that also work:
 
-Force backend-only locally: `$env:TODAI_BACKEND_ONLY = "1"; py -3 main.py`
+```powershell
+python -m todai.api.main
+python todai\api\main.py
+```
 
-Alternate sandbox entry (same app, port 8010): `py -3 run_sandbox.py`
+| URL | Description |
+|-----|-------------|
+| **http://127.0.0.1:8000/** | Chat UI + `/api/*` |
+| **http://127.0.0.1:8000/health** | Liveness + planner mode |
+
+Legacy `todai_sandbox/` (unchanged on disk): `$env:TODAI_USE_SANDBOX = "1"; py -3 main.py`
+
+## Tests
+
+```powershell
+py -3 -m pytest tests/ -q
+```
 
 ## What is pushed to GitHub
 
 | Pushed | Ignored (local only) |
 |--------|----------------------|
-| `todai/` package + layer folders | `todai_sandbox/` |
-| `main.py`, `requirements.txt`, `README.md` | `static/`, `data/`, `tests/`, `docs/` |
-| `.gitignore`, `.env.example` | `.env`, `.venv/`, `run_sandbox.py` |
+| `todai/` package | `todai_sandbox/` (legacy) |
+| `main.py`, `requirements.txt`, `tests/`, `README.md` | `data/`, `.env`, `.venv/` |
+| `.gitignore`, `.env.example` | Root `static/` (use `todai/api/static/`) |

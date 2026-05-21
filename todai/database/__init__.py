@@ -1,1 +1,1 @@
-"""Database Layer — models, repositories, migrations, sessions."""
+"""Database / persistence layer."""

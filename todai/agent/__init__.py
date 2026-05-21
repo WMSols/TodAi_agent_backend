@@ -1,1 +1,5 @@
-"""AI Agent Core — orchestration, planning, tools, routing."""
+"""TodAI agent package."""
+
+from todai.agent.core import orchestrate_turn
+
+__all__ = ["orchestrate_turn"]

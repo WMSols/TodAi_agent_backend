@@ -1,0 +1,26 @@
+{
+  "user_id": "default",
+  "display_name": "Sandbox User",
+  "timezone": "UTC",
+  "working_hours": { "start": "09:00", "end": "18:00" },
+  "preferences": {
+    "study_evenings": true,
+    "light_weekends": false
+  },
+  "goals": [
+    {
+      "id": "g1",
+      "title": "Prepare for IELTS",
+      "deadline": "2026-07-01",
+      "priority": "high",
+      "status": "active"
+    },
+    {
+      "id": "g2",
+      "title": "Weekly gym routine",
+      "deadline": null,
+      "priority": "medium",
+      "status": "active"
+    }
+  ]
+}

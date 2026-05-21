@@ -1,0 +1,154 @@
+<mxfile host="app.diagrams.net" modified="2026-05-19T00:00:00.000Z" agent="TodAI" version="22.1.0" type="device">
+  <diagram id="mvp-db-schema" name="MVP Database">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="TodAI Production MVP — Database Schema&#xa;(Flutter app + calendar AI agent — no debug / ML tables)" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=14;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="320" y="20" width="760" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="legend" value="PK = primary key  |  FK = foreign key  |  Times in UTC (timestamptz)  |  Local date/time from users.timezone" style="text;html=1;strokeColor=none;fillColor=#f5f5f5;align=center;fontSize=11;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="320" y="60" width="760" height="28" as="geometry" />
+        </mxCell>
+
+        <!-- users -->
+        <mxCell id="users" value="&lt;b&gt;users&lt;/b&gt;&lt;hr&gt;id UUID &lt;b&gt;PK&lt;/b&gt;&lt;br&gt;auth_provider_id TEXT UNIQUE&lt;br&gt;email TEXT UNIQUE&lt;br&gt;display_name TEXT&lt;br&gt;timezone TEXT NOT NULL&lt;br&gt;locale TEXT NOT NULL&lt;br&gt;status TEXT (active|deleted)&lt;br&gt;created_at, updated_at" style="rounded=0;whiteSpace=wrap;html=1;align=left;fillColor=#dae8fc;strokeColor=#6c8ebf;spacingLeft=8;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="520" y="110" width="260" height="150" as="geometry" />
+        </mxCell>
+
+        <!-- user_settings -->
+        <mxCell id="user_settings" value="&lt;b&gt;user_settings&lt;/b&gt;&lt;hr&gt;user_id UUID &lt;b&gt;PK, FK&lt;/b&gt; → users&lt;br&gt;working_day_start TIME&lt;br&gt;working_day_end TIME&lt;br&gt;working_days SMALLINT[]&lt;br&gt;default_event_duration_minutes INT&lt;br&gt;created_at, updated_at" style="rounded=0;whiteSpace=wrap;html=1;align=left;fillColor=#dae8fc;strokeColor=#6c8ebf;spacingLeft=8;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="840" y="110" width="280" height="130" as="geometry" />
+        </mxCell>
+
+        <!-- calendar_events -->
+        <mxCell id="calendar_events" value="&lt;b&gt;calendar_events&lt;/b&gt;&lt;hr&gt;id UUID &lt;b&gt;PK&lt;/b&gt;&lt;br&gt;user_id UUID &lt;b&gt;FK&lt;/b&gt; → users&lt;br&gt;title TEXT NOT NULL&lt;br&gt;description TEXT&lt;br&gt;start_at TIMESTAMPTZ NOT NULL&lt;br&gt;end_at TIMESTAMPTZ NOT NULL&lt;br&gt;all_day BOOLEAN&lt;br&gt;kind TEXT (meeting|focus|…)&lt;br&gt;location TEXT&lt;br&gt;source TEXT (user|agent)&lt;br&gt;status TEXT (confirmed|cancelled)&lt;br&gt;created_at, updated_at, deleted_at" style="rounded=0;whiteSpace=wrap;html=1;align=left;fillColor=#fff2cc;strokeColor=#d6b656;spacingLeft=8;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="40" y="320" width="300" height="200" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cal_note" value="Day/weekday shown in app:&#xa;format start_at + users.timezone" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="530" width="200" height="36" as="geometry" />
+        </mxCell>
+
+        <!-- conversations -->
+        <mxCell id="conversations" value="&lt;b&gt;conversations&lt;/b&gt;&lt;hr&gt;id UUID &lt;b&gt;PK&lt;/b&gt;&lt;br&gt;user_id UUID &lt;b&gt;FK&lt;/b&gt; → users&lt;br&gt;title TEXT&lt;br&gt;last_message_at TIMESTAMPTZ&lt;br&gt;created_at&lt;br&gt;archived_at" style="rounded=0;whiteSpace=wrap;html=1;align=left;fillColor=#d5e8d4;strokeColor=#82b366;spacingLeft=8;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="400" y="320" width="240" height="130" as="geometry" />
+        </mxCell>
+
+        <!-- messages -->
+        <mxCell id="messages" value="&lt;b&gt;messages&lt;/b&gt;&lt;hr&gt;id UUID &lt;b&gt;PK&lt;/b&gt;&lt;br&gt;conversation_id UUID &lt;b&gt;FK&lt;/b&gt;&lt;br&gt;user_id UUID &lt;b&gt;FK&lt;/b&gt; → users&lt;br&gt;role TEXT (user|assistant)&lt;br&gt;content TEXT&lt;br&gt;created_at" style="rounded=0;whiteSpace=wrap;html=1;align=left;fillColor=#d5e8d4;strokeColor=#82b366;spacingLeft=8;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="400" y="500" width="240" height="130" as="geometry" />
+        </mxCell>
+
+        <!-- conversation_context -->
+        <mxCell id="conversation_context" value="&lt;b&gt;conversation_context&lt;/b&gt;&lt;hr&gt;conversation_id UUID &lt;b&gt;PK, FK&lt;/b&gt;&lt;br&gt;summary TEXT&lt;br&gt;summary_through_message_id UUID &lt;b&gt;FK&lt;/b&gt; → messages&lt;br&gt;updated_at" style="rounded=0;whiteSpace=wrap;html=1;align=left;fillColor=#e1d5e7;strokeColor=#9673a6;spacingLeft=8;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="680" y="500" width="280" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ctx_note" value="Short recap of older chat —&#xa;not duplicate bubbles" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="680" y="610" width="180" height="32" as="geometry" />
+        </mxCell>
+
+        <!-- agent_memories -->
+        <mxCell id="agent_memories" value="&lt;b&gt;agent_memories&lt;/b&gt;&lt;hr&gt;id UUID &lt;b&gt;PK&lt;/b&gt;&lt;br&gt;user_id UUID &lt;b&gt;FK&lt;/b&gt; → users&lt;br&gt;memory_type TEXT&lt;br&gt;  (highlight|preference|constraint|fact|routine)&lt;br&gt;content TEXT&lt;br&gt;importance SMALLINT 1–10&lt;br&gt;source TEXT (user|agent|onboarding)&lt;br&gt;valid_until DATE&lt;br&gt;created_at, updated_at, deleted_at" style="rounded=0;whiteSpace=wrap;html=1;align=left;fillColor=#f8cecc;strokeColor=#b85450;spacingLeft=8;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="320" width="300" height="170" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mem_note" value="Long-term AI notebook —&#xa;highlights &amp; preferences" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="500" width="160" height="32" as="geometry" />
+        </mxCell>
+
+        <!-- agent_turns -->
+        <mxCell id="agent_turns" value="&lt;b&gt;agent_turns&lt;/b&gt;&lt;hr&gt;id UUID &lt;b&gt;PK&lt;/b&gt;&lt;br&gt;user_id UUID &lt;b&gt;FK&lt;/b&gt;&lt;br&gt;conversation_id UUID &lt;b&gt;FK&lt;/b&gt;&lt;br&gt;user_message_id UUID &lt;b&gt;FK&lt;/b&gt; UNIQUE → messages&lt;br&gt;assistant_message_id UUID &lt;b&gt;FK&lt;/b&gt; UNIQUE → messages&lt;br&gt;intent TEXT (chat|schedule_read|write|delete)&lt;br&gt;status TEXT (completed|failed)&lt;br&gt;created_at, completed_at" style="rounded=0;whiteSpace=wrap;html=1;align=left;fillColor=#ffe6cc;strokeColor=#d79b00;spacingLeft=8;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="680" y="320" width="280" height="150" as="geometry" />
+        </mxCell>
+
+        <mxCell id="turn_note" value="1 row per Send tap —&#xa;not shown in Flutter UI" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="680" y="280" width="160" height="32" as="geometry" />
+        </mxCell>
+
+        <!-- Relationships -->
+        <mxCell id="r_users_settings" style="endArrow=ERone;endFill=0;startArrow=ERone;startFill=0;html=1;rounded=0;" edge="1" parent="1" source="users" target="user_settings">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r_users_settings_l" value="1:1" style="edgeLabel;html=1;align=center;verticalAlign=middle;" vertex="1" connectable="0" parent="r_users_settings">
+          <mxGeometry x="-0.1" relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
+        </mxCell>
+
+        <mxCell id="r_users_cal" style="endArrow=ERmany;endFill=0;startArrow=ERone;startFill=0;html=1;rounded=0;" edge="1" parent="1" source="users" target="calendar_events">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r_users_cal_l" value="1:N" style="edgeLabel;html=1;align=center;verticalAlign=middle;" vertex="1" connectable="0" parent="r_users_cal">
+          <mxGeometry x="-0.1" relative="1" as="geometry"><mxPoint x="10" y="-10" as="offset" /></mxGeometry>
+        </mxCell>
+
+        <mxCell id="r_users_conv" style="endArrow=ERmany;endFill=0;startArrow=ERone;startFill=0;html=1;rounded=0;" edge="1" parent="1" source="users" target="conversations">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r_users_conv_l" value="1:N" style="edgeLabel;html=1;align=center;verticalAlign=middle;" vertex="1" connectable="0" parent="r_users_conv">
+          <mxGeometry relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
+        </mxCell>
+
+        <mxCell id="r_users_mem" style="endArrow=ERmany;endFill=0;startArrow=ERone;startFill=0;html=1;rounded=0;" edge="1" parent="1" source="users" target="agent_memories">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r_users_mem_l" value="1:N" style="edgeLabel;html=1;align=center;verticalAlign=middle;" vertex="1" connectable="0" parent="r_users_mem">
+          <mxGeometry relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
+        </mxCell>
+
+        <mxCell id="r_conv_msg" style="endArrow=ERmany;endFill=0;startArrow=ERone;startFill=0;html=1;rounded=0;" edge="1" parent="1" source="conversations" target="messages">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r_conv_msg_l" value="1:N" style="edgeLabel;html=1;align=center;verticalAlign=middle;" vertex="1" connectable="0" parent="r_conv_msg">
+          <mxGeometry relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
+        </mxCell>
+
+        <mxCell id="r_conv_ctx" style="endArrow=ERone;endFill=0;startArrow=ERone;startFill=0;html=1;rounded=0;" edge="1" parent="1" source="conversations" target="conversation_context">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r_conv_ctx_l" value="1:1" style="edgeLabel;html=1;align=center;verticalAlign=middle;" vertex="1" connectable="0" parent="r_conv_ctx">
+          <mxGeometry relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
+        </mxCell>
+
+        <mxCell id="r_conv_turn" style="endArrow=ERmany;endFill=0;startArrow=ERone;startFill=0;html=1;rounded=0;" edge="1" parent="1" source="conversations" target="agent_turns">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r_conv_turn_l" value="1:N" style="edgeLabel;html=1;align=center;verticalAlign=middle;" vertex="1" connectable="0" parent="r_conv_turn">
+          <mxGeometry relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
+        </mxCell>
+
+        <mxCell id="r_turn_user_msg" style="endArrow=ERone;endFill=0;startArrow=ERone;startFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="agent_turns" target="messages">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="600" y="480" />
+              <mxPoint x="520" y="480" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r_turn_user_msg_l" value="user_message" style="edgeLabel;html=1;align=center;fontSize=9;" vertex="1" connectable="0" parent="r_turn_user_msg">
+          <mxGeometry relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
+        </mxCell>
+
+        <mxCell id="r_ctx_msg" style="endArrow=ERone;endFill=0;startArrow=ERone;startFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="conversation_context" target="messages">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Flutter / Agent boxes -->
+        <mxCell id="flutter_box" value="&lt;b&gt;Flutter app reads/writes&lt;/b&gt;&lt;br&gt;users, user_settings&lt;br&gt;calendar_events&lt;br&gt;conversations, messages" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="110" width="200" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="agent_box" value="&lt;b&gt;AI agent loads each turn&lt;/b&gt;&lt;br&gt;recent messages&lt;br&gt;conversation_context.summary&lt;br&gt;agent_memories (top N)&lt;br&gt;calendar_events (date range)&lt;br&gt;user_settings + timezone" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="580" width="220" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="out_box" value="&lt;b&gt;Not in MVP DB&lt;/b&gt;&lt;br&gt;tool_trace, Groq debug&lt;br&gt;ML training tables&lt;br&gt;embeddings (v2)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;dashed=1;align=left;spacingLeft=10;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="110" width="180" height="80" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

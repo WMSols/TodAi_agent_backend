@@ -1,0 +1,272 @@
+<mxfile host="app.diagrams.net" agent="TodAI" version="22.1.0" type="device">
+  <diagram id="overview" name="1 - System Overview">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title1" value="TodAI Sandbox — System Overview" style="text;html=1;fontSize=20;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="500" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="browser" value="Browser&#xa;static/index.html&#xa;• Chat bubbles&#xa;• Agent bar (state, planner, pending, sched ver)&#xa;• Confirm / Reject / Reset&#xa;• API response log + token summary" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="280" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="api" value="FastAPI (todai_sandbox/main.py)&#xa;POST /api/chat&#xa;POST /api/confirm | /reject&#xa;GET /api/state&#xa;POST /api/reset&#xa;GET /health" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="400" y="80" width="260" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="orch" value="Orchestrator&#xa;(orchestrator.py)&#xa;• process_chat&#xa;• confirm / reject&#xa;• FSM state transitions&#xa;• tool_trace + debug" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="720" y="80" width="240" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="groq" value="Groq LLM (optional)&#xa;groq_client.py&#xa;• plan_with_groq (pass 1)&#xa;• synthesize_after_reads (pass 2)&#xa;JSON envelope: assistant_text + tool_calls" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="80" width="260" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="mock" value="Mock planner&#xa;(if no GROQ_API_KEY)&#xa;Deterministic rules in&#xa;mock_plan()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="240" width="260" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="validator" value="Validator&#xa;validate_assistant_envelope&#xa;validate_tool_call (schemas, ranges, placeholder ids)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="720" y="260" width="240" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="executor" value="Tools executor&#xa;execute_read_tools&#xa;build_write_preview_proposal&#xa;apply_proposal (on confirm only)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="400" y="260" width="260" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="scheduling" value="Scheduling engine&#xa;scheduling.py&#xa;overlap detection, merge ops" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="400" y="390" width="200" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="storage" value="JSON storage (UserStore)&#xa;data/users/&lt;user_id&gt;/&#xa;• chat.json (messages, state, pending_proposal)&#xa;• profile.json (goals, display_name)&#xa;• calendar_YYYY-MM.json (blocks)&#xa;File lock per user" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=12;fillColor=#dae8fc;strokeColor=#6c8ebf;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="280" width="280" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="browser" target="api"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="api" target="orch"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;dashed=1;" edge="1" parent="1" source="orch" target="groq"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="orch" target="validator"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="orch" target="executor"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="executor" target="storage"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;dashed=1;" edge="1" parent="1" source="orch" target="mock"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="legend" value="Agent type: Orchestrated tool-using agent with human-in-the-loop writes&#xa;Planner (Groq) proposes; backend executes tools and validates; user Confirm applies calendar JSON." style="text;html=1;align=left;fontSize=11;fillColor=#f5f5f5;strokeColor=#999999;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="480" width="700" height="50" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="chat-flow" name="2 - process_chat Flow">
+    <mxGraphModel dx="1800" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="t2" value="process_chat(user_id, message) — one HTTP request" style="text;html=1;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="600" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="s1" value="Load chat.json&#xa;state == awaiting_confirmation?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="40" y="70" width="200" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="s1y" value="YES: block new chat&#xa;reply: use Confirm/Reject" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;" vertex="1" parent="1">
+          <mxGeometry x="280" y="70" width="180" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="s2" value="Append user message&#xa;state → analyzing&#xa;last_turn_id = new UUID" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="40" y="200" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="s3" value="planner_storage_index()&#xa;Inject into Groq system prompt" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;" vertex="1" parent="1">
+          <mxGeometry x="40" y="300" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="s4" value="Pass 1: plan_with_groq&#xa;(or mock_plan)&#xa;Returns JSON envelope" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;" vertex="1" parent="1">
+          <mxGeometry x="40" y="390" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="s5" value="validate_assistant_envelope&#xa;Invalid → state error, return" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;" vertex="1" parent="1">
+          <mxGeometry x="40" y="490" width="200" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="s6" value="Split tool_calls:&#xa;reads vs write_preview&#xa;Dedupe reads&#xa;Ack-only? → read_suppressed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;" vertex="1" parent="1">
+          <mxGeometry x="320" y="390" width="240" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="s7" value="If reads:&#xa;state → requesting_data&#xa;execute_read_tools" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;" vertex="1" parent="1">
+          <mxGeometry x="320" y="510" width="240" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="s8" value="Groq + reads + no preview?&#xa;Pass 2: synthesize_after_reads&#xa;READ_RESULTS_JSON in prompt&#xa;Replace assistant_text" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;" vertex="1" parent="1">
+          <mxGeometry x="600" y="490" width="260" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="s9" value="If write_preview?&#xa;build_write_preview_proposal&#xa;scheduling + rules validate" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;" vertex="1" parent="1">
+          <mxGeometry x="320" y="620" width="220" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="s9ok" value="OK: pending_proposal in chat&#xa;state → awaiting_confirmation&#xa;User must Confirm" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="580" y="620" width="240" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="s9fail" value="Fail: state → error&#xa;No disk write" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;" vertex="1" parent="1">
+          <mxGeometry x="580" y="710" width="180" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="s10" value="Reads only:&#xa;state → idle&#xa;Append assistant to chat&#xa;Return ChatResponse + tool_trace + debug.groq" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="40" y="620" width="240" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="cf1" value="confirm():&#xa;apply_proposal → calendar JSON&#xa;schedule_version++ only if months_written &gt; 0&#xa;state → idle" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="900" y="620" width="280" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="cf2" value="reject():&#xa;Clear pending_proposal&#xa;state → idle&#xa;No disk write" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="900" y="730" width="200" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="f1" style="endArrow=classic;html=1;" edge="1" parent="1" source="s1" target="s1y"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f2" style="endArrow=classic;html=1;" edge="1" parent="1" source="s1" target="s2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f3" style="endArrow=classic;html=1;" edge="1" parent="1" source="s2" target="s3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f4" style="endArrow=classic;html=1;" edge="1" parent="1" source="s3" target="s4"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f5" style="endArrow=classic;html=1;" edge="1" parent="1" source="s4" target="s5"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f6" style="endArrow=classic;html=1;" edge="1" parent="1" source="s5" target="s6"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f7" style="endArrow=classic;html=1;" edge="1" parent="1" source="s6" target="s7"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f8" style="endArrow=classic;html=1;" edge="1" parent="1" source="s7" target="s8"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f9" style="endArrow=classic;html=1;" edge="1" parent="1" source="s8" target="s9"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f10" style="endArrow=classic;html=1;" edge="1" parent="1" source="s9" target="s9ok"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f11" style="endArrow=classic;html=1;" edge="1" parent="1" source="s9" target="s9fail"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f12" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1" source="s7" target="s10"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="note2" value="Single HTTP round-trip: user waits for full turn (plan + reads + optional synth + preview). UI shows agent state from response." style="text;html=1;align=left;fontSize=10;fillColor=#f5f5f5;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="820" width="600" height="40" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="fsm" name="3 - State Machine">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="800" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="t3" value="Conversation FSM (chat.json state field)" style="text;html=1;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="400" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="idle" value="idle&#xa;Ready for chat" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="200" y="80" width="120" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="analyzing" value="analyzing&#xa;Planner running" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="80" y="220" width="120" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="reqdata" value="requesting_data&#xa;Read tools on disk" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="280" y="220" width="140" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="await" value="awaiting_confirmation&#xa;pending_proposal set&#xa;Confirm / Reject only" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="480" y="80" width="180" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="applying" value="applying&#xa;Writing calendar JSON" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;" vertex="1" parent="1">
+          <mxGeometry x="720" y="80" width="130" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="error" value="error&#xa;Validation / preview / apply failed" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="200" y="380" width="160" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="fe1" value="user message" style="endArrow=classic;html=1;" edge="1" parent="1" source="idle" target="analyzing"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe2" value="has reads" style="endArrow=classic;html=1;" edge="1" parent="1" source="analyzing" target="reqdata"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe3" value="preview OK" style="endArrow=classic;html=1;" edge="1" parent="1" source="reqdata" target="await"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe4" value="reads only → idle" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1" source="reqdata" target="idle"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe5" value="Confirm" style="endArrow=classic;html=1;" edge="1" parent="1" source="await" target="applying"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe6" value="done" style="endArrow=classic;html=1;" edge="1" parent="1" source="applying" target="idle"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe7" value="Reject" style="endArrow=classic;html=1;" edge="1" parent="1" source="await" target="idle"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe8" value="fail" style="endArrow=classic;html=1;strokeColor=#b85450;" edge="1" parent="1" source="analyzing" target="error"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe9" value="new message (from error)" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1" source="error" target="analyzing"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="block" value="Chat while awaiting_confirmation&#xa;→ blocked (no state change)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="480" y="220" width="200" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="fe10" style="endArrow=classic;html=1;dashed=1;strokeColor=#b85450;" edge="1" parent="1" source="await" target="block"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="groq" name="4 - Groq Two-Pass">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="t4" value="Groq planner: two API calls when reads run (reads-only turn)" style="text;html=1;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="700" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1box" value="PASS 1 — plan (phase: plan)&#xa;&#xa;System: rules + tool docs + storage_index&#xa;(server_date_utc, profile, known_block_ids, calendar summary)&#xa;&#xa;Messages: last 14 chat turns (cap 3500 chars/msg)&#xa;&#xa;Output JSON:&#xa;{ assistant_text, tool_calls[] }&#xa;&#xa;May request READ tools only, WRITE_PREVIEW, or neither" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;align=left;spacingLeft=10;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="40" y="70" width="380" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="backend" value="BACKEND (no LLM)&#xa;&#xa;validate_assistant_envelope&#xa;execute_read_tools:&#xa;  get_schedule_range&#xa;  get_free_time&#xa;  get_active_goals&#xa;  analyze_progress&#xa;&#xa;tool_trace.phase = reads" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;align=left;spacingLeft=10;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="480" y="70" width="280" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2box" value="PASS 2 — synthesize (phase: synthesize)&#xa;&#xa;Only if: groq mode + read_results + no write_preview in same turn&#xa;&#xa;System: synthesis rules + storage_index&#xa;Messages: history + synthetic user msg with READ_RESULTS_JSON&#xa;&#xa;Output: assistant_text only, tool_calls must be []&#xa;&#xa;debug.groq.synthesis.usage = token counts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;align=left;spacingLeft=10;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="40" y="320" width="380" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="usersees" value="USER SEES (chat bubble)&#xa;&#xa;Final assistant_text from pass 2 (or pass 1 if no reads / ack suppressed / preview path)&#xa;&#xa;NOT raw tool JSON in bubble&#xa;read_digest only in debug panel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;align=left;spacingLeft=10;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="480" y="320" width="280" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="skip" value="Skipped pass 2 when:&#xa;• mock planner&#xa;• tool_calls empty (pass 1 only)&#xa;• write_preview in same turn&#xa;• read_suppressed (ack-only heuristic)" style="text;html=1;align=left;fillColor=#f5f5f5;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="550" width="400" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="gp1" style="endArrow=classic;html=1;" edge="1" parent="1" source="p1box" target="backend"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="gp2" style="endArrow=classic;html=1;" edge="1" parent="1" source="backend" target="p2box"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="gp3" style="endArrow=classic;html=1;" edge="1" parent="1" source="p2box" target="usersees"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="tools" name="5 - Tools and Data">
+    <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="t5" value="Tool registry (tools_registry.py) — side_effect classes" style="text;html=1;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="500" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="readlane" value="READ (execute immediately, no Confirm)" style="swimlane;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="620" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="r1" value="get_schedule_range(from, to)&#xa;→ blocks from calendar_*.json" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="readlane">
+          <mxGeometry x="20" y="50" width="280" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="r2" value="get_free_time(from, to)&#xa;→ per-day free_gaps (gaps between busy blocks)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="readlane">
+          <mxGeometry x="20" y="110" width="280" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="r3" value="get_active_goals()&#xa;→ goals[] from profile.json" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="readlane">
+          <mxGeometry x="20" y="170" width="280" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="r4" value="analyze_progress()&#xa;→ stub stats (no real history yet)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="readlane">
+          <mxGeometry x="320" y="50" width="280" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="writelane" value="WRITE_PREVIEW (proposal in chat; Confirm to apply)" style="swimlane;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="40" y="360" width="620" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="w1" value="modify_schedule(operations)&#xa;add | update | remove&#xa;Validated: overlaps, end&gt;start, real block ids" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="writelane">
+          <mxGeometry x="20" y="50" width="280" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="w2" value="generate_weekly_plan(week_start, tasks[])&#xa;tasks min 1; maps to calendar add ops&#xa;Empty tasks rejected" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="writelane">
+          <mxGeometry x="320" y="50" width="280" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="nogol" value="NOT IMPLEMENTED YET&#xa;• add_goal / write profile&#xa;• Goals: read-only; model must not claim saved goals" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="700" y="60" width="280" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="chatjson" value="chat.json fields&#xa;state, schedule_version, pending_proposal_id, pending_proposal, messages[], last_turn_id" style="shape=note;whiteSpace=wrap;html=1;size=14;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="700" y="160" width="280" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="resetbox" value="POST /api/reset&#xa;Restores seed profile + calendar&#xa;Clears chat (schedule_version=1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;" vertex="1" parent="1">
+          <mxGeometry x="700" y="280" width="240" height="70" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="sequence" name="6 - Sequence (Chat Turn)">
+    <mxGraphModel dx="1600" dy="700" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="700" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="t6" value="Typical sequence: user asks for schedule (Groq + reads)" style="text;html=1;fontSize=16;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="500" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="u" value="User" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="60" width="40" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="ui" value="Sandbox UI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;" vertex="1" parent="1">
+          <mxGeometry x="160" y="70" width="100" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="api2" value="FastAPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="300" y="70" width="100" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="or2" value="Orchestrator" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;" vertex="1" parent="1">
+          <mxGeometry x="440" y="70" width="100" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2" value="Groq" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;" vertex="1" parent="1">
+          <mxGeometry x="580" y="70" width="100" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="disk" value="JSON files" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="720" y="60" width="80" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="m1" value="1. POST /api/chat" style="endArrow=open;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="100" y="160" as="sourcePoint"/><mxPoint x="210" y="95" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="m2" value="2. process_chat" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="260" y="95" as="sourcePoint"/><mxPoint x="440" y="95" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="m3" value="3. plan_with_groq" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="490" y="95" as="sourcePoint"/><mxPoint x="580" y="95" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="m4" value="4. tool_calls: get_schedule_range" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="490" y="130" as="sourcePoint"/><mxPoint x="760" y="100" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="m5" value="5. synthesize_after_reads" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="490" y="150" as="sourcePoint"/><mxPoint x="580" y="150" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="m6" value="6. ChatResponse + debug.groq.usage" style="endArrow=open;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="440" y="180" as="sourcePoint"/><mxPoint x="210" y="120" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="lifeline" value="" style="endArrow=none;dashed=1;html=1;strokeColor=#999999;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="490" y="200" as="sourcePoint"/><mxPoint x="490" y="400" as="targetPoint"/></mxGeometry></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

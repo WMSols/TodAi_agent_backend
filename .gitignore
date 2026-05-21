@@ -1,4 +1,4 @@
-# --- Local sandbox (R&D agent — keep on disk, do not push) ---
+# --- Local sandbox copy (optional legacy; remove when no longer needed) ---
 todai_sandbox/
 
 # --- Local dev, secrets, caches ---
@@ -11,12 +11,20 @@ __pycache__/
 .pytest_cache/
 *.tmp
 
-# --- Not part of backend repository init (local only) ---
-static/
+# --- Runtime data (not in repo) ---
 data/
-tests/
-docs/
-pytest.ini
-run_sandbox.py
-main_sandbox.py
+
+# --- Legacy root static (UI lives in todai/api/static/) ---
+/static/
 .env.example
+docs/DEGRADED_AGENT.md
+docs/SANDBOX_PHASES.md
+tests/test_agent_window.py
+tests/test_date_anchor.py
+tests/test_degraded_agent.py
+tests/test_operation_guard.py
+tests/test_preview_range.py
+tests/test_rate_limit.py
+tests/test_routing_guards.py
+tests/test_schedule_format.py
+tests/test_scheduling.py
