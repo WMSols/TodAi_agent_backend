@@ -264,4 +264,6 @@ Stores product data and agent memory only — no debug traces, tool logs, or ML 
 ## Related docs
 
 - [Orchestrator flow](./orchestrator-flow.drawio) — code path per user message
+- [Goals & tasks schema](./goals-tasks-schema.drawio) — goals, weekly plans, tasks synced to calendar
+- [Goals & tasks (markdown)](./goals-tasks-schema.md) — column reference for goals tables
 - Sandbox today uses JSON under `data/users/`; this schema is the production target

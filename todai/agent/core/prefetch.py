@@ -7,6 +7,8 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from todai.agent.core.prefetch_tools import augment_preview_tool_calls
+from todai.agent.routing.weekday_pick import pick_nearest_weekday_option
 from todai.agent.tools.calendar import run_prefetch, validate_tool_plan
 from todai.agent.planner.llm import AgentRoute, default_tools_for_route
 from todai.agent.routing.preview_range import (
@@ -14,7 +16,15 @@ from todai.agent.routing.preview_range import (
     apply_preview_range_to_tools,
     clamp_preview_range,
     message_has_month_phrase,
-    resolve_time_scope,
+)
+from todai.agent.routing.date_anchor import single_day_iso_from_anchor
+from todai.agent.routing.time_scope import (
+    message_implies_multi_weekday_scope,
+    message_implies_single_day,
+    refine_scope_for_message,
+    resolve_preview_range_for_turn,
+    scope_from_weekday_candidates,
+    strip_router_tool_dates,
 )
 from todai.database.storage import UserStore, parse_server_date
 
@@ -52,8 +62,10 @@ def resolve_and_prefetch(
     message: str = "",
     date_anchor: dict[str, Any] | None = None,
     preview_range: PreviewRange | None = None,
+    time_scope: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], PreviewRange | None]:
     """Returns (tool_calls, read_results, errors, preview_range)."""
+    router_tools = strip_router_tool_dates(router_tools)
     tool_calls, tool_errors = validate_tool_plan(router_tools, server_today=server_today)
     if not tool_calls and route != AgentRoute.CHAT:
         tool_calls = default_tools_for_route(route, full_index)
@@ -62,25 +74,47 @@ def resolve_and_prefetch(
     resolved_scope = preview_range
     if route != AgentRoute.CHAT:
         if resolved_scope is None:
-            resolved_scope = resolve_time_scope(message, date_anchor, full_index=full_index)
+            resolved_scope = resolve_preview_range_for_turn(
+                time_scope=time_scope,
+                message=message,
+                date_anchor=date_anchor,
+                full_index=full_index,
+                route=route.value,
+            )
         else:
             resolved_scope = clamp_preview_range(resolved_scope, today)
+        resolved_scope = refine_scope_for_message(
+            resolved_scope,
+            message=message,
+            date_anchor=date_anchor,
+            today=today,
+        )
+
+        candidates = (date_anchor or {}).get("weekday_candidates") or {}
+        if message_implies_multi_weekday_scope(message, date_anchor):
+            multi = scope_from_weekday_candidates(date_anchor, today)
+            if multi:
+                resolved_scope = multi
+        elif len(candidates) == 1:
+            iso = pick_nearest_weekday_option(next(iter(candidates.values())), today)
+            if iso:
+                day_range = _single_day_range(iso)
+                if day_range:
+                    resolved_scope = clamp_preview_range(day_range, today)
 
         if tool_calls and resolved_scope:
-            mentioned = (date_anchor or {}).get("mentioned_weekdays") or {}
-            use_day = (
-                len(mentioned) == 1
-                and not message_has_month_phrase(message)
-                and resolved_scope.granularity == "day"
+            if message_implies_single_day(message, date_anchor) and not message_has_month_phrase(message):
+                iso = single_day_iso_from_anchor(date_anchor)
+                if iso:
+                    day_range = _single_day_range(iso)
+                    if day_range:
+                        resolved_scope = clamp_preview_range(day_range, today)
+            tool_calls = _apply_time_scope(tool_calls, resolved_scope)
+
+        if route == AgentRoute.SCHEDULE_PREVIEW and resolved_scope:
+            tool_calls = augment_preview_tool_calls(
+                tool_calls, message=message, scope=resolved_scope
             )
-            if use_day:
-                day_range = _single_day_range(next(iter(mentioned.values())))
-                if day_range:
-                    tool_calls = _apply_time_scope(tool_calls, clamp_preview_range(day_range, today))
-                else:
-                    tool_calls = _apply_time_scope(tool_calls, resolved_scope)
-            else:
-                tool_calls = _apply_time_scope(tool_calls, resolved_scope)
 
     if not tool_calls:
         return [], [], tool_errors, resolved_scope

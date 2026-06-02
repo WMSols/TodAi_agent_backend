@@ -19,11 +19,13 @@ def handle(ctx: TurnContext) -> IntentResult:
     reply, operations, spec_dbg = run_specialist(ctx)
     ctx.trace.append({"phase": "specialist", "operation_count": len(operations)})
 
+    resolved_scope = ctx.preview_range.as_dict() if ctx.preview_range else None
     reply, applied, apply_errors, months, guard_trace = apply_with_guard(
         ctx.store,
         route="schedule_delete",
         reply=reply,
         operations=operations,
+        resolved_scope=resolved_scope,
     )
     if guard_trace:
         ctx.trace.append({"phase": "direct_apply", **guard_trace, "errors": apply_errors})

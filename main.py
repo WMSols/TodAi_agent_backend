@@ -53,7 +53,7 @@ def main() -> None:
         host=HOST,
         port=PORT,
         reload=use_reload,
-        log_level=os.environ.get("TODAI_LOG_LEVEL", "debug").lower(),
+        log_level=os.environ.get("TODAI_LOG_LEVEL", "info").lower(),
     )
 
 

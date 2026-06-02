@@ -28,3 +28,10 @@ tests/test_rate_limit.py
 tests/test_routing_guards.py
 tests/test_schedule_format.py
 tests/test_scheduling.py
+docs/todai-full-schema.dbml
+docs/goals-tasks-schema.md
+docs/mvp-database-schema.md
+docs/goals-tasks-schema.drawio
+docs/supabase/README.md
+todai/README.md
+docs/mvp-database-schema.md

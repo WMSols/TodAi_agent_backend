@@ -13,6 +13,7 @@ from todai.agent.routing.preview_range import (
     agent_window_as_dict,
     user_request_outside_agent_window,
 )
+from todai.agent.routing.preview_read_kind import PreviewReadKind, classify_preview_read
 # Cap specialist calendar JSON (~3k chars ≈ under 1k tokens for typical weeks)
 _SPECIALIST_BLOCKS_CAP = 4500
 _MONTH_DIGEST_THRESHOLD = 18
@@ -103,6 +104,49 @@ def extract_schedule_bundle(
     return None
 
 
+def extract_days_without_schedule_bundle(
+    read_results: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    for r in read_results:
+        if r.get("tool") != "get_days_without_schedule" or not r.get("ok"):
+            continue
+        data = r.get("data") or {}
+        days = data.get("days_without_schedule") or []
+        return {
+            "from": str(data.get("from", ""))[:10],
+            "to": str(data.get("to", ""))[:10],
+            "count": data.get("count", len(days)),
+            "days": days,
+        }
+    return None
+
+
+def extract_free_time_bundle(read_results: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Compact free-slot gaps per day for the specialist."""
+    for r in read_results:
+        if r.get("tool") != "get_free_time" or not r.get("ok"):
+            continue
+        data = r.get("data") or {}
+        slim_days: list[dict[str, Any]] = []
+        for day in data.get("days") or []:
+            gaps = day.get("free_gaps") or []
+            if not gaps:
+                continue
+            slim_days.append(
+                {
+                    "date": day.get("date"),
+                    "free_gaps": gaps[:8],
+                    "gap_count": len(gaps),
+                }
+            )
+        return {
+            "from": str(data.get("from", ""))[:10],
+            "to": str(data.get("to", ""))[:10],
+            "days": slim_days,
+        }
+    return None
+
+
 def slim_block_index(full_index: dict[str, Any]) -> list[dict[str, str]]:
     """Minimal id+title for delete matching."""
     rows: list[dict[str, str]] = []
@@ -150,10 +194,35 @@ def build_turn_facts(
         anchor["agent_window"] = facts["agent_window"]
     if anchor:
         facts["dates"] = anchor
+    preview_kind = (
+        classify_preview_read(current_message)
+        if route == "schedule_preview"
+        else PreviewReadKind.SCHEDULE
+    )
+    facts["preview_read_kind"] = preview_kind.value
+
     scope_granularity = (preview_range or {}).get("granularity") if preview_range else None
     sched = extract_schedule_bundle(read_results, scope_granularity=scope_granularity)
-    if sched:
+    empty_days = extract_days_without_schedule_bundle(read_results)
+    free_time = extract_free_time_bundle(read_results)
+
+    if route == "schedule_preview" and preview_kind == PreviewReadKind.FREE_DAYS:
+        if empty_days:
+            facts["days_without_schedule"] = empty_days
+        if sched and len(sched.get("blocks") or []) > 20:
+            sched = {**sched, "blocks": (sched.get("blocks") or [])[:8], "truncated": True}
+        if sched:
+            facts["schedule"] = sched
+    elif route == "schedule_preview" and preview_kind == PreviewReadKind.FREE_TIME:
+        if free_time:
+            facts["free_time"] = free_time
+        if sched and len(sched.get("blocks") or []) > 12:
+            sched = {**sched, "blocks": (sched.get("blocks") or [])[:6], "truncated": True}
+        if sched:
+            facts["schedule"] = sched
+    elif sched:
         facts["schedule"] = sched
+
     if preview_range:
         facts["resolved_scope"] = preview_range
         if route == "schedule_preview":
@@ -169,28 +238,74 @@ def build_turn_facts(
     if route == "schedule_write":
         aw = facts["agent_window"]
         wk_cand = (date_anchor or {}).get("weekday_candidates") or {}
+        scope = facts.get("resolved_scope") or {}
+        scope_from = str(scope.get("from") or "")[:10]
+        scope_to = str(scope.get("to") or "")[:10]
+        pinned_day = scope_from if scope_from and scope_from == scope_to else ""
+        cand_isos = {
+            (opt.get("iso") or "")[:10]
+            for opts in wk_cand.values()
+            if isinstance(opts, list)
+            for opt in opts
+            if (opt.get("iso") or "")[:10]
+        }
         day_rule = "use dates.mentioned_weekdays for day when set and unambiguous"
-        if wk_cand:
+        if pinned_day and (not wk_cand or pinned_day in cand_isos):
+            facts["resolved_day"] = pinned_day
+            day_rule = (
+                f"resolved_scope pins {pinned_day} ({scope.get('label', pinned_day)}) — "
+                "use that date for all add op start/end times; emit add ops when title and times are clear; "
+                "never claim a date is outside agent_window when it falls between "
+                f"agent_window.from and agent_window.to ({aw['from']}–{aw['to']})"
+            )
+        elif wk_cand:
             facts["weekday_candidates"] = wk_cand
             day_rule = (
                 "weekday_candidates means multiple dates match (e.g. two Fridays); "
                 "operations [] and ask which date (list each label); do not pick one yourself"
             )
+        multi_day = ""
+        if scope.get("from") and scope.get("to") and scope.get("from") != scope.get("to"):
+            multi_day = (
+                f" Multi-day: user_message + resolved_scope ({scope.get('from')}–{scope.get('to')}) — "
+                "send one add op per calendar day in that range with the same title/times; "
+                "do not ask user to confirm."
+            )
         facts["write_rules"] = (
             "add op: start/end ISO local times from user_message; "
             f"event date MUST be within agent_window ({aw['from']}–{aw['to']}, {AGENT_WINDOW_DAYS} days); "
             "if outside_agent_window, operations [] and explain you cannot save outside that range; "
-            f"{day_rule}; if only duration (e.g. one hour) without clock time, operations [] and ask start/end times"
+            f"{day_rule}; if only duration without clock time, operations [] and ask start/end times; "
+            "before add, check schedule blocks in resolved_scope for the same day/time — "
+            "if the slot overlaps an existing event, operations [] and name that event and its time; "
+            "never ask user to confirm — emit add ops when details are clear."
+            + multi_day
         )
     if route == "schedule_preview" and facts.get("outside_agent_window"):
         facts["preview_rules"] = (
             f"operations []. Say you can only show the next {AGENT_WINDOW_DAYS} days from server_today "
             "and cannot view dates outside agent_window."
         )
-    if route == "schedule_delete" and facts.get("outside_agent_window"):
-        facts["delete_rules"] = (
-            f"operations []. Say you can only remove events in the next {AGENT_WINDOW_DAYS} days."
+    elif route == "schedule_preview" and preview_kind == PreviewReadKind.FREE_DAYS:
+        facts["preview_rules"] = (
+            "User asked for days with NO events (whole days free). "
+            "Use days_without_schedule.days only — list those dates; do not name days that have events. "
+            "operations []. 1–2 short sentences."
         )
+    elif route == "schedule_preview" and preview_kind == PreviewReadKind.FREE_TIME:
+        facts["preview_rules"] = (
+            "User asked for free TIME SLOTS (gaps between events), not whole empty days. "
+            "Use free_time.days (date + free_gaps). Do not treat busy days as fully free. "
+            "operations []. 1–2 short sentences."
+        )
+    if route == "schedule_delete":
+        del_rules = (
+            f"operations []. Say you can only remove events in the next {AGENT_WINDOW_DAYS} days."
+            if facts.get("outside_agent_window")
+            else "remove only events whose date falls in resolved_scope; "
+            "one named day → remove ops for that day only, not the whole week."
+        )
+        facts["delete_rules"] = del_rules
     return facts
 
 
@@ -220,12 +335,16 @@ def build_router_user_context_slim(
             separators=(",", ":"),
             default=str,
         )
-        + "\n\nRespond with JSON only (route + tools). No user reply text."
+        + "\n\nRespond with JSON only (route + time_scope + tool names). No dates in tools. No user reply text."
     )
 
 
 def build_specialist_user_payload_slim(turn_facts: dict[str, Any]) -> str:
     blob = json.dumps(turn_facts, ensure_ascii=False, separators=(",", ":"), default=str)
+    if len(blob) > _SPECIALIST_BLOCKS_CAP and turn_facts.get("days_without_schedule"):
+        trimmed = dict(turn_facts)
+        trimmed.pop("schedule", None)
+        blob = json.dumps(trimmed, ensure_ascii=False, separators=(",", ":"), default=str)
     if len(blob) > _SPECIALIST_BLOCKS_CAP and "schedule" in turn_facts:
         trimmed = dict(turn_facts)
         sched = dict(trimmed.get("schedule") or {})

@@ -23,7 +23,9 @@ from pydantic import BaseModel, Field, field_validator
 from todai.agent.core.clarify import reply_is_clarifying
 from todai.agent.routing.preview_range import AGENT_WINDOW_DAYS, agent_window_bounds
 from todai.api.middleware.rate_limit import TurnAllowance, current_turn_user_id, groq_tracker, rate_limit_user_message
-from todai.database.storage import GROQ_API_KEY, GROQ_BASE_URL, GROQ_MODEL, logger, parse_server_date
+from todai.agent.planner.groq_config import GROQ_API_KEY, GROQ_BASE_URL, GROQ_MODEL
+from todai.api.logging import logger
+from todai.database.utils.dates import parse_server_date
 
 # ── Router contract (parsed from Groq JSON) ───────────────────────────────
 
@@ -40,7 +42,15 @@ _VALID_ROUTES = {r.value for r in AgentRoute}
 
 class RouterOutput(BaseModel):
     route: str = "chat"
+    time_scope: str = "default"
     tools: list[dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("time_scope", mode="before")
+    @classmethod
+    def _norm_time_scope(cls, v: Any) -> str:
+        from todai.agent.routing.time_scope import normalize_time_scope
+
+        return normalize_time_scope(str(v) if v is not None else None)
 
     @field_validator("route", mode="before")
     @classmethod
@@ -54,14 +64,15 @@ class RouterOutput(BaseModel):
 
 
 def parse_router_output(raw: dict[str, Any]) -> tuple[RouterOutput | None, list[dict[str, Any]]]:
+    from todai.agent.routing.time_scope import normalize_router_tools
+
     if not isinstance(raw, dict):
         return None, [{"code": "INVALID_ROUTER", "detail": "expected object"}]
     normalized = {
         "route": raw.get("route") or raw.get("state") or raw.get("prompt"),
-        "tools": raw.get("tools") or raw.get("toolPlan") or [],
+        "time_scope": raw.get("time_scope") or raw.get("scope") or raw.get("timeScope") or "default",
+        "tools": normalize_router_tools(raw.get("tools") or raw.get("toolPlan")),
     }
-    if not isinstance(normalized["tools"], list):
-        normalized["tools"] = []
     try:
         return RouterOutput.model_validate(normalized), []
     except Exception as e:
@@ -71,19 +82,31 @@ def parse_router_output(raw: dict[str, Any]) -> tuple[RouterOutput | None, list[
 # ── 1. Prompts ────────────────────────────────────────────────────────────
 
 ROUTER_JSON_CONTRACT = (
-    'JSON only: {"route": string, "tools": array}\n'
+    'JSON only: {"route": string, "time_scope": string, "tools": array}\n'
     "route: chat | schedule_preview | schedule_write | schedule_delete\n"
-    'tools: [{tool, arguments:{from,to}}] or []. Tools: get_schedule_range, get_free_time, get_active_goals\n'
+    "time_scope: default | today | tomorrow | this_week | next_week | single_day | free_days | free_time\n"
+    'tools: ["get_schedule_range"] or [{"tool":"get_schedule_range"}]; NO from/to in tools.\n'
+    "Tools: get_schedule_range, get_free_time, get_days_without_schedule, get_active_goals\n"
+)
+
+# Compact scenario map (server maps time_scope → dates; see ROUTING_HINTS.weekdays).
+ROUTER_TIME_SCOPE_RULES = (
+    "time_scope (pick one):\n"
+    "today — today's schedule; tomorrow — tomorrow only;\n"
+    "this_week — rest of current calendar week (today→Sun);\n"
+    "next_week — FULL next Mon–Sun only (next week|next all week|coming week|add every day next week);\n"
+    "single_day — ONE day: on/for weekday, ISO date, next monday|next saturday (NOT next_week);\n"
+    "free_days + get_days_without_schedule — days with zero events;\n"
+    "free_time + get_free_time — gap slots; default — vague/all/upcoming/what's on (14d window).\n"
 )
 
 # --- Token-optimized (active) ---
 ROUTER_SYSTEM = (
-    "TodAI router. Classify CURRENT_USER_MESSAGE only.\n"
+    "TodAI router. CURRENT_USER_MESSAGE + ROUTING_CONTEXT for short follow-ups.\n"
     + ROUTER_JSON_CONTRACT
-    + "chat=thanks/okay/small talk/meta (tools []). "
-    "schedule_preview=see calendar. schedule_write=add/change/time follow-up. schedule_delete=remove.\n"
-    f"Use ROUTING_HINTS dates for tool from/to within the next {AGENT_WINDOW_DAYS} days from today. "
-    "No user reply. Output JSON only.\n"
+    + ROUTER_TIME_SCOPE_RULES
+    + "chat: tools [], time_scope default. preview: read calendar. write: add/move/time. delete: remove.\n"
+    "Do not use next_week for next <weekday> alone. Output JSON only.\n"
 )
 
 SPECIALIST_JSON_CONTRACT = (
@@ -102,29 +125,33 @@ SPECIALIST_SYSTEM_CHAT = (
 
 SPECIALIST_SYSTEM_PREVIEW = (
     f"TodAI preview. operations []. Only the next {AGENT_WINDOW_DAYS} days from server_today (agent_window) exist for you. "
-    "TURN_FACTS schedule + resolved_scope are truth. "
+    "Follow preview_read_kind and preview_rules in TURN_FACTS. "
+    "days_without_schedule = whole days with zero events; free_time = gap slots on busy days. "
     "If outside_agent_window is true, operations [] and say clearly you cannot view or change dates outside that window. "
     "If schedule.empty is true, say nothing is scheduled in that period. Do not invent events. "
-    "UI shows the table — reply 2 short sentences (intro + highlights), no day-by-day list.\n"
+    "UI shows the table — reply 1–2 short sentences; for free_days list only days from days_without_schedule.days.\n"
 )
 
 SPECIALIST_SYSTEM_WRITE = (
     f"TodAI write. Only the next {AGENT_WINDOW_DAYS} days from server_today (agent_window). "
-    "Need day, start, end, title before add. Else operations [] and ask once in replyText. "
-    "If outside_agent_window is true, operations [] and say you cannot add or change dates outside agent_window. "
-    "If weekday_candidates is set, operations [] and ask which date (list options) before times. "
-    "Use dates.mentioned_weekdays only when exactly one day is resolved (no weekday_candidates for that weekday). "
+    "When day, start, end, and title are clear in user_message, send add operations immediately — "
+    "do not ask the user to confirm. Server saves when operations are valid. "
+    "operations [] only when something is missing or ambiguous; then ask once for that detail. "
+    "If outside_agent_window is true, operations [] and say you cannot add outside agent_window. "
+    "If weekday_candidates is set, operations [] and ask which date (list options). "
+    "Use dates.mentioned_weekdays only when exactly one day is resolved. "
     "start and end must be ISO datetimes (YYYY-MM-DDTHH:MM:SS) matching user_message times "
-    "(10 pm → T22:00:00, not midnight). end after start. "
-    "Event day must be within agent_window.from–to. "
-    "If unsure, operations [] and ask — do not save. Confirm in replyText when sending add.\n"
+    "(9 am → T09:00:00, not midnight). end after start. "
+    "Each event day must be within resolved_scope or agent_window. "
+    "For multi-day requests (e.g. every day next week), send one add op per day in resolved_scope. "
+    "Do not say you added or saved unless operations includes those add ops.\n"
 )
 
 SPECIALIST_SYSTEM_DELETE = (
-    f"TodAI delete. Only events in the next {AGENT_WINDOW_DAYS} days (agent_window). "
-    "Match TURN_FACTS event_index + schedule. "
-    "If outside_agent_window is true, operations [] and say you cannot remove dates outside the window. "
-    "Ambiguous → ops [] and ask which. Clear match → remove op + confirm.\n"
+    f"TodAI delete. Only the next {AGENT_WINDOW_DAYS} days (agent_window). "
+    "Match event_index + schedule. resolved_scope is the day or range to act on — "
+    "remove only events on that day when scope is one day; do not remove other days in prefetch. "
+    "Ambiguous weekday → ops [] and ask which date. Clear match → remove op(s) only for that scope.\n"
 )
 
 # --- Legacy prompts (backup — pre token optimization) ---
@@ -454,10 +481,11 @@ def groq_chat_json(
 
 
 def mock_route(message: str) -> dict[str, Any]:
+    from todai.agent.routing.preview_read_kind import PreviewReadKind, classify_preview_read
+    from todai.agent.routing.time_scope import infer_time_scope_from_message
+
     m = message.lower().strip()
     today_d = date(2026, 5, 19)
-    _, end_d = agent_window_bounds(today_d)
-    today, week_end = today_d.isoformat(), end_d.isoformat()
     if any(w in m for w in ("delete", "remove", "clear")):
         route = AgentRoute.SCHEDULE_DELETE.value
     elif any(w in m for w in ("add", "book", "create", "move ", "reschedule")):
@@ -480,12 +508,28 @@ def mock_route(message: str) -> dict[str, Any]:
         route = AgentRoute.SCHEDULE_PREVIEW.value
     else:
         route = AgentRoute.CHAT.value
-    tools = (
-        [{"tool": "get_schedule_range", "arguments": {"from": today, "to": week_end}}]
-        if route != AgentRoute.CHAT.value
-        else []
-    )
-    return {"route": route, "tools": tools, "_groq_debug": {"ok": True, "mock": True}}
+    time_scope = infer_time_scope_from_message(message)
+    tools: list[dict[str, Any]] = []
+    if route != AgentRoute.CHAT.value:
+        kind = classify_preview_read(message)
+        if kind == PreviewReadKind.FREE_DAYS:
+            tools = [
+                {"tool": "get_days_without_schedule"},
+                {"tool": "get_schedule_range"},
+            ]
+        elif kind == PreviewReadKind.FREE_TIME:
+            tools = [
+                {"tool": "get_free_time"},
+                {"tool": "get_schedule_range"},
+            ]
+        else:
+            tools = [{"tool": "get_schedule_range"}]
+    return {
+        "route": route,
+        "time_scope": time_scope,
+        "tools": tools,
+        "_groq_debug": {"ok": True, "mock": True},
+    }
 
 
 def route_turn(
@@ -508,7 +552,7 @@ def route_turn(
     if routing_context:
         messages.extend(routing_context)
     messages.append({"role": "user", "content": ctx})
-    out = groq_chat_json(messages, phase="router", max_tokens=80, temperature=0)
+    out = groq_chat_json(messages, phase="router", max_tokens=120, temperature=0)
     if isinstance(out.get("_groq_debug"), dict):
         out["_groq_debug"]["prompt_bundle"] = "slim_v1"
         out["_groq_debug"]["prompt_chars"] = {
@@ -522,9 +566,7 @@ def route_turn(
 def default_tools_for_route(route: AgentRoute, full_index: dict[str, Any]) -> list[dict[str, Any]]:
     if route == AgentRoute.CHAT:
         return []
-    today = parse_server_date(full_index)
-    _, end = agent_window_bounds(today)
-    return [{"tool": "get_schedule_range", "arguments": {"from": today.isoformat(), "to": end.isoformat()}}]
+    return [{"tool": "get_schedule_range", "arguments": {}}]
 
 
 def specialist_turn(

@@ -6,21 +6,12 @@ Python **FastAPI** backend — API layer, AI agent, and file-backed storage.
 
 ```
 todai/
-├── api/                    # HTTP routes, static UI, middleware
-│   ├── main.py             # FastAPI app entry
-│   ├── service.py          # process_chat, debug state
-│   ├── static/index.html   # Chat + debug UI
-│   └── middleware/
-├── agent/                  # AI agent
-│   ├── core/               # Turn orchestration, intents, display
-│   ├── planner/            # Groq router + specialist (llm, prompts)
-│   ├── routing/            # Intent routing, date scope, guards
-│   └── tools/              # Calendar read/write tools
-├── memory/                 # Reserved for future memory layers
-└── database/               # File storage, seeds, API models
-    ├── storage.py
-    └── seed/default/
+├── api/                    # HTTP, static UI, logging, middleware
+├── agent/                  # Orchestrator, planner (Groq), routing, tools
+└── database/               # models, repositories, stores, utils, seed
 ```
+
+See [todai/README.md](todai/README.md) for the full package map.
 
 ## Setup
 

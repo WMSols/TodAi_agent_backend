@@ -11,6 +11,7 @@ import re
 
 from todai.agent.core.display import build_schedule_display
 from todai.agent.core.intents._shared import run_specialist
+from todai.agent.core.preview_reply import build_free_days_period_reply, build_grounded_preview_reply
 from todai.agent.routing.preview_range import resolve_preview_range
 from todai.agent.core.types import IntentResult, TurnContext
 
@@ -40,6 +41,19 @@ def handle(ctx: TurnContext) -> IntentResult:
     reply, operations, spec_dbg = run_specialist(ctx)
     if operations:
         ctx.trace.append({"phase": "preview", "dropped_operations": len(operations)})
+    grounded = build_grounded_preview_reply(
+        message=ctx.message,
+        read_results=ctx.read_results,
+        preview=preview,
+    )
+    if grounded:
+        reply = grounded
+        ctx.trace.append({"phase": "preview_reply", "source": "grounded"})
+    elif not grounded:
+        period_reply = build_free_days_period_reply(ctx.message, ctx.read_results)
+        if period_reply:
+            reply = period_reply
+            ctx.trace.append({"phase": "preview_reply", "source": "grounded_free_days"})
     reply = _sanitize_preview_reply(reply)
     if not reply:
         reply = "Here's your schedule below."

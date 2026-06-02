@@ -13,6 +13,7 @@ import re
 from typing import Any
 
 from todai.agent.planner.llm import AgentRoute, RouterOutput
+from todai.agent.routing.time_scope import strip_router_tool_dates
 
 _WRITE_VERBS = re.compile(r"\b(add|book|create|reschedule)\b", re.I)
 _DELETE_VERBS = re.compile(r"\b(remove|delete|cancel|clear)\b", re.I)
@@ -188,7 +189,7 @@ def apply_route_guards(
     last_agent_mode: str | None = None,
 ) -> tuple[AgentRoute, list[dict[str, Any]], list[dict[str, Any]]]:
     notes: list[dict[str, Any]] = []
-    tools = normalize_router_tool_calls(router_out.tools)
+    tools = strip_router_tool_dates(normalize_router_tool_calls(router_out.tools))
     route = router_out.agent_route
 
     if is_plain_chat_message(message):

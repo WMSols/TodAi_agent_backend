@@ -15,11 +15,16 @@ import uuid
 from typing import Any
 
 from todai.agent.planner.llm import AgentRoute
-from todai.agent.core.context import assistant_meta, groq_history_from_chat, groq_router_context, groq_specialist_history
+from todai.agent.core.context import (
+    assistant_meta,
+    groq_history_from_chat,
+    merged_write_context_message,
+    groq_specialist_history,
+)
+from todai.agent.routing.time_scope import normalize_time_scope, resolve_preview_range_for_turn
 from todai.agent.routing.date_anchor import build_date_anchor
 from todai.agent.core.intents import dispatch
 from todai.agent.core.prefetch import resolve_and_prefetch
-from todai.agent.routing.preview_range import resolve_preview_range, resolve_time_scope
 from todai.agent.routing.router import run_router
 from todai.agent.routing.routing_guards import apply_route_guards
 from todai.agent.core.types import (
@@ -30,7 +35,10 @@ from todai.agent.core.types import (
     route_to_agent_mode,
 )
 from todai.api.middleware.rate_limit import groq_tracker, rate_limit_user_message
-from todai.database.storage import GROQ_API_KEY, ChatResponse, UserStore, logger
+from todai.agent.planner.groq_config import GROQ_API_KEY
+from todai.api.logging import logger
+from todai.database.models import ChatResponse
+from todai.database.stores import UserStore
 
 
 def orchestrate_turn(store: UserStore, *, user_id: str, message: str) -> ChatResponse:
@@ -104,7 +112,14 @@ def orchestrate_turn(store: UserStore, *, user_id: str, message: str) -> ChatRes
     router_out.route = route.value
     router_out.tools = tools
     mode = route_to_agent_mode(route)
-    trace.append({"phase": "router", "route": route.value, "tools": router_out.tools})
+    trace.append(
+        {
+            "phase": "router",
+            "route": route.value,
+            "time_scope": router_out.time_scope,
+            "tools": router_out.tools,
+        }
+    )
     if router_dbg and isinstance(router_dbg, dict) and router_dbg.get("prompt_chars"):
         trace.append(
             {
@@ -119,11 +134,16 @@ def orchestrate_turn(store: UserStore, *, user_id: str, message: str) -> ChatRes
         chat["state"] = ConversationState.REQUESTING_DATA.value
         store.write_chat(chat)
 
+    ts = normalize_time_scope(router_out.time_scope)
     preview_range = None
-    if route == AgentRoute.SCHEDULE_PREVIEW:
-        preview_range = resolve_preview_range(message, date_anchor, full_index=full_index)
-    elif route in (AgentRoute.SCHEDULE_WRITE, AgentRoute.SCHEDULE_DELETE):
-        preview_range = resolve_time_scope(message, date_anchor, full_index=full_index)
+    if route != AgentRoute.CHAT:
+        preview_range = resolve_preview_range_for_turn(
+            time_scope=ts,
+            message=message,
+            date_anchor=date_anchor,
+            full_index=full_index,
+            route=route.value,
+        )
 
     tool_calls, read_results, prefetch_errors, preview_range = resolve_and_prefetch(
         store,
@@ -134,10 +154,15 @@ def orchestrate_turn(store: UserStore, *, user_id: str, message: str) -> ChatRes
         message=message,
         date_anchor=date_anchor,
         preview_range=preview_range,
+        time_scope=ts,
     )
     trace.append({"phase": "prefetch", "calls": tool_calls, "errors": prefetch_errors})
     if preview_range and route != AgentRoute.CHAT:
         trace.append({"phase": "time_scope", **preview_range.as_dict()})
+    if route == AgentRoute.SCHEDULE_PREVIEW:
+        from todai.agent.routing.preview_read_kind import classify_preview_read
+
+        trace.append({"phase": "preview_read_kind", "kind": classify_preview_read(message).value})
 
     if prefetch_errors and not read_results and route != AgentRoute.CHAT:
         chat["state"] = ConversationState.ERROR.value
@@ -147,11 +172,14 @@ def orchestrate_turn(store: UserStore, *, user_id: str, message: str) -> ChatRes
         return _error_response(reply, chat, mode, trace, prefetch_errors, router_dbg, user_id=user_id)
 
     specialist_history = groq_specialist_history(chat["messages"], route.value)
+    specialist_message = message
+    if route == AgentRoute.SCHEDULE_WRITE:
+        specialist_message = merged_write_context_message(chat["messages"], message)
 
     ctx = TurnContext(
         store=store,
         user_id=user_id,
-        message=message,
+        message=specialist_message,
         chat=chat,
         history=specialist_history,
         route=route,
@@ -203,7 +231,7 @@ def _rate_limit_response(
     *,
     user_id: str,
 ) -> ChatResponse:
-    from todai.database.storage import planner_mode
+    from todai.agent.planner.groq_config import planner_mode
 
     return ChatResponse(
         assistant_text=reply,
@@ -229,7 +257,7 @@ def _error_response(
     *,
     user_id: str,
 ) -> ChatResponse:
-    from todai.database.storage import planner_mode
+    from todai.agent.planner.groq_config import planner_mode
 
     usage = groq_tracker.usage_snapshot(user_id)
     dbg: dict[str, Any] = {"pipeline": "orchestrator", "planner": planner_mode(), "api_usage": usage}

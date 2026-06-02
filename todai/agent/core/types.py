@@ -16,7 +16,8 @@ from typing import Any
 
 from todai.agent.planner.llm import AgentRoute
 from todai.agent.routing.preview_range import PreviewRange
-from todai.database.storage import ChatResponse, UserStore
+from todai.database.models import ChatResponse
+from todai.database.stores import UserStore
 
 
 class ConversationState(str, Enum):
@@ -78,7 +79,7 @@ def chat_response_from_turn(
     user_id: str,
 ) -> ChatResponse:
     from todai.api.middleware.rate_limit import groq_tracker
-    from todai.database.storage import planner_mode
+    from todai.agent.planner.groq_config import planner_mode
 
     usage = groq_tracker.usage_snapshot(user_id)
     debug: dict[str, Any] = {

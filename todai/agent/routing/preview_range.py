@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import calendar
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import Any
 
+from todai.agent.routing.weekday_pick import pick_nearest_weekday_option
 from todai.database.storage import parse_server_date
 
 AGENT_WINDOW_DAYS = 14
@@ -53,7 +54,15 @@ _MONTH_OF = re.compile(rf"\bmonth\s+of\s+({_MONTH_NAME_PATTERN})\b", re.I)
 _IN_MONTH = re.compile(rf"\b(?:in|for)\s+({_MONTH_NAME_PATTERN})(?:\s+(\d{{4}}))?\b", re.I)
 _NAMED_MONTH = re.compile(rf"\b({_MONTH_NAME_PATTERN})(?:\s+(\d{{4}}))?\b", re.I)
 
-_WEEK_PHRASES = re.compile(r"\bthis\s+week\b|\bnext\s+week\b", re.I)
+_WEEK_PHRASES = re.compile(
+    r"\bthis\s+week\b|\bnext\s+week\b|"
+    r"\bnext\s+all\s+week\b|\ball\s+(?:of\s+)?next\s+week\b|\bcoming\s+week\b",
+    re.I,
+)
+_NEXT_WEEK_PHRASES = re.compile(
+    r"\bnext\s+week\b|\bnext\s+all\s+week\b|\ball\s+(?:of\s+)?next\s+week\b|\bcoming\s+week\b",
+    re.I,
+)
 _UPCOMING_PHRASES = re.compile(
     r"\bupcoming\b|\bwhat'?s\s+on\b|\bshow\s+(?:me\s+)?(?:my\s+)?(?:the\s+)?schedule\b|"
     r"\bpreview\b|\bmy\s+week\b|\bcoming\s+up\b",
@@ -86,6 +95,8 @@ class PreviewRange:
             "label": self.label,
             "granularity": self.granularity,
             "explicit": self.explicit,
+            "fill_empty_days": self.fill_empty_days,
+            "show_free_banners": self.show_free_banners,
         }
 
 
@@ -396,7 +407,7 @@ def resolve_time_scope(
         if _DAY_FOCUS.search(m) or re.search(r"\bschedule\b", m):
             scope = _single_day(today)
 
-    if scope is None and re.search(r"\bnext\s+week\b", m):
+    if scope is None and _NEXT_WEEK_PHRASES.search(m):
         scope = _next_calendar_week(today)
 
     if scope is None and re.search(r"\bthis\s+week\b", m):
@@ -422,6 +433,27 @@ def resolve_time_scope(
                     pass
 
     if scope is None:
+        candidates = anchor.get("weekday_candidates") or {}
+        asks_weekday = bool(
+            _DAY_FOCUS.search(m)
+            or re.search(r"\b(?:on|for)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", m)
+            or re.search(r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", m)
+        )
+        if (
+            asks_weekday
+            and len(candidates) == 1
+            and not _WEEK_PHRASES.search(m)
+            and not message_has_month_phrase(message)
+        ):
+            opts = next(iter(candidates.values()))
+            iso = pick_nearest_weekday_option(opts, today)
+            if iso:
+                try:
+                    scope = _single_day(date.fromisoformat(iso[:10]))
+                except ValueError:
+                    pass
+
+    if scope is None:
         scope = _week_default(today)
 
     return clamp_preview_range(scope, today)
@@ -432,26 +464,39 @@ def resolve_preview_range(
     date_anchor: dict[str, Any] | None,
     *,
     full_index: dict[str, Any] | None = None,
+    time_scope: str | None = None,
 ) -> PreviewRange:
     """Alias used by schedule_preview intent."""
-    return resolve_time_scope(message, date_anchor, full_index=full_index)
+    from todai.agent.routing.time_scope import resolve_preview_range_for_turn
+
+    return resolve_preview_range_for_turn(
+        time_scope=time_scope,
+        message=message,
+        date_anchor=date_anchor,
+        full_index=full_index,
+        route="schedule_preview",
+    )
+
+
+_RANGE_TOOLS = frozenset(
+    {"get_schedule_range", "get_free_time", "get_days_without_schedule"}
+)
 
 
 def apply_preview_range_to_tools(
     tool_calls: list[dict[str, Any]],
     preview: PreviewRange,
 ) -> list[dict[str, Any]]:
-    """Set get_schedule_range arguments to the resolved window."""
+    """Align all range read tools to the resolved preview window."""
     want = {"from": preview.date_from, "to": preview.date_to}
     out: list[dict[str, Any]] = []
-    replaced = False
+    seen: set[str] = set()
     for call in tool_calls:
-        if call.get("tool") == "get_schedule_range":
-            if not replaced:
-                out.append({"tool": "get_schedule_range", "arguments": want})
-                replaced = True
+        tool = str(call.get("tool") or "")
+        if tool in _RANGE_TOOLS:
+            if tool not in seen:
+                out.append({"tool": tool, "arguments": dict(want)})
+                seen.add(tool)
             continue
         out.append(call)
-    if not replaced:
-        out.insert(0, {"tool": "get_schedule_range", "arguments": want})
     return out

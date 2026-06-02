@@ -12,8 +12,9 @@ import re
 from datetime import datetime
 from typing import Any
 
-from todai.agent.tools.calendar import apply_operations_direct, parse_iso_dt
-from todai.agent.core.clarify import reply_is_clarifying
+from todai.agent.tools.calendar import CalendarService, apply_operations_direct, parse_iso_dt
+from todai.agent.tools.scheduling import find_conflicts_for_operation
+from todai.agent.core.clarify import reply_blocks_apply, reply_is_clarifying
 from todai.database.storage import UserStore
 
 _USER_TIME_HINT = re.compile(
@@ -107,6 +108,63 @@ def validate_add_time_range(
     return []
 
 
+def validate_schedule_conflict(
+    op: dict[str, Any],
+    store: UserStore,
+) -> list[dict[str, Any]]:
+    """Reject add/update when the time slot overlaps an existing event."""
+    kind = str(op.get("op") or "").lower()
+    if kind not in ("add", "update"):
+        return []
+    try:
+        start = parse_iso_dt(str(op["start"]))
+        end = parse_iso_dt(str(op["end"]))
+    except (KeyError, ValueError):
+        return []
+    existing = CalendarService(store).get_events(start.date(), end.date())
+    conflicts = find_conflicts_for_operation(op, existing)
+    if not conflicts:
+        return []
+    c0 = conflicts[0]
+    title = str(c0.get("title") or "another event")
+    try:
+        cs = parse_iso_dt(str(c0["start"]))
+        ce = parse_iso_dt(str(c0["end"]))
+        slot = f"{cs.strftime('%A %d %B')}, {_clock(cs)}–{_clock(ce)}"
+    except (KeyError, ValueError):
+        slot = "that time"
+    return [
+        {
+            "code": "SLOT_CONFLICT",
+            "detail": f"{slot} is already booked with {title}",
+            "conflict": c0,
+        }
+    ]
+
+
+def _remove_op_in_scope(
+    op: dict[str, Any],
+    resolved_scope: dict[str, Any] | None,
+    store: UserStore,
+) -> bool:
+    if str(op.get("op") or "").lower() != "remove":
+        return True
+    if not resolved_scope:
+        return True
+    fr = str(resolved_scope.get("from") or "")[:10]
+    to = str(resolved_scope.get("to") or "")[:10]
+    if not fr or not to:
+        return True
+    blk = _find_block(store, str(op.get("id") or ""))
+    if not blk:
+        return False
+    try:
+        day = parse_iso_dt(str(blk.get("start") or "")).date().isoformat()
+    except ValueError:
+        return False
+    return fr <= day <= to
+
+
 def filter_operations_for_apply(
     route: str,
     reply: str,
@@ -114,34 +172,43 @@ def filter_operations_for_apply(
     *,
     user_message: str = "",
     resolved_scope: dict[str, Any] | None = None,
-) -> tuple[list[dict[str, Any]], str | None]:
+    store: UserStore | None = None,
+) -> tuple[list[dict[str, Any]], str | None, dict[str, Any] | None]:
     if not operations:
-        return [], None
-    if route in ("schedule_write", "schedule_delete") and reply_is_clarifying(reply):
-        return [], "clarifying_reply"
+        return [], None, None
+    if route in ("schedule_write", "schedule_delete") and reply_blocks_apply(route, reply):
+        return [], "clarifying_reply", None
     valid: list[dict[str, Any]] = []
+    slot_conflict_detail: dict[str, Any] | None = None
+    had_time_errors = False
     for op in operations:
         errs = (
             validate_add_time_range(op, user_message=user_message, resolved_scope=resolved_scope)
             if route == "schedule_write"
             else validate_operation(op)
         )
+        if errs:
+            had_time_errors = True
+        if not errs and route == "schedule_write" and store is not None:
+            errs = validate_schedule_conflict(op, store)
+            if errs:
+                slot_conflict_detail = errs[0]
+        if not errs and route == "schedule_delete" and store is not None:
+            if not _remove_op_in_scope(op, resolved_scope, store):
+                errs = [{"code": "OUT_OF_SCOPE", "detail": "remove outside resolved day"}]
         if not errs:
             valid.append(op)
     if not valid:
-        if route == "schedule_write" and operations:
-            return [], "invalid_times"
-        return [], "invalid_operations"
-    return valid, None
+        if slot_conflict_detail:
+            return [], "slot_conflict", slot_conflict_detail
+        if route == "schedule_write" and operations and had_time_errors:
+            return [], "invalid_times", None
+        return [], "invalid_operations", None
+    return valid, None, None
 
 
 def _find_block(store: UserStore, block_id: str) -> dict[str, Any] | None:
-    for p in store.paths.root.glob("calendar_*.json"):
-        ym = p.stem.replace("calendar_", "")
-        for b in store.read_calendar_month(ym).get("blocks") or []:
-            if str(b.get("id")) == block_id:
-                return dict(b)
-    return None
+    return store.find_block(block_id)
 
 
 def _clock(dt: datetime) -> str:
@@ -205,20 +272,29 @@ def apply_with_guard(
     resolved_scope: dict[str, Any] | None = None,
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]], int, dict[str, Any]]:
     trace: dict[str, Any] = {}
-    to_apply, block = filter_operations_for_apply(
+    to_apply, block, block_detail = filter_operations_for_apply(
         route,
         reply,
         operations,
         user_message=user_message,
         resolved_scope=resolved_scope,
+        store=store,
     )
     if block:
         trace["apply_blocked"] = block
         trace["dropped_operations"] = len(operations)
+        if block_detail:
+            trace["block_detail"] = block_detail
         if block == "invalid_times":
             reply = (
                 "I couldn't save that — the times didn't look right. "
                 "Please say the day and a clear range (for example Saturday 10 pm to 11 pm)."
+            )
+        elif block == "slot_conflict":
+            detail = str((block_detail or {}).get("detail") or "That time slot is already booked.")
+            reply = (
+                f"I can't add that — {detail}. "
+                "Choose a different time or ask me to move or replace the existing event."
             )
         return reply, [], [], 0, trace
 

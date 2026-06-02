@@ -159,6 +159,36 @@ class CalendarService:
             d += timedelta(days=1)
         return {"from": start.isoformat(), "to": end.isoformat(), "days": days, "blocks_overlapping_range": len(blocks)}
 
+    def days_without_schedule(self, start: date, end: date) -> dict[str, Any]:
+        """Calendar days in range with zero events (whole-day free)."""
+        a, b = start, end if end >= start else start
+        blocks = self.get_events(a, b)
+        busy_dates: set[str] = set()
+        for blk in blocks:
+            try:
+                busy_dates.add(parse_iso_dt(str(blk["start"])).date().isoformat())
+            except (KeyError, ValueError):
+                continue
+        empty_days: list[dict[str, Any]] = []
+        d = a
+        while d <= b:
+            iso = d.isoformat()
+            if iso not in busy_dates:
+                empty_days.append(
+                    {
+                        "date": iso,
+                        "weekday": d.strftime("%A"),
+                        "label": f"{d.strftime('%A')}, {d.day} {d.strftime('%B')}",
+                    }
+                )
+            d += timedelta(days=1)
+        return {
+            "from": a.isoformat(),
+            "to": b.isoformat(),
+            "days_without_schedule": empty_days,
+            "count": len(empty_days),
+        }
+
 
 # ── 3. Read-tool registry ─────────────────────────────────────────────────
 
@@ -191,9 +221,16 @@ class AnalyzeProgressArgs(BaseModel):
     to: str | None = None
 
 
+_RANGE_READ_TOOLS = (
+    "get_schedule_range",
+    "get_free_time",
+    "get_days_without_schedule",
+)
+
 TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "get_schedule_range": {"side_effect": ToolSideEffect.READ, "args_model": GetScheduleRangeArgs},
     "get_free_time": {"side_effect": ToolSideEffect.READ, "args_model": GetScheduleRangeArgs},
+    "get_days_without_schedule": {"side_effect": ToolSideEffect.READ, "args_model": GetScheduleRangeArgs},
     "get_active_goals": {"side_effect": ToolSideEffect.READ, "args_model": GetActiveGoalsArgs},
     "analyze_progress": {"side_effect": ToolSideEffect.READ, "args_model": AnalyzeProgressArgs},
 }
@@ -241,7 +278,12 @@ def validate_tool_plan(
         args = _normalize_range_args(call.get("arguments") or {})
         model = TOOL_REGISTRY[tool]["args_model"]
         try:
-            if tool in ("get_schedule_range", "get_free_time"):
+            if tool in _RANGE_READ_TOOLS:
+                fr = (args.get("from") or "")[:10]
+                to = (args.get("to") or "")[:10]
+                if not fr or not to:
+                    out.append({"tool": tool, "arguments": {}})
+                    continue
                 validated = model.model_validate(args)
                 a = datetime.strptime(validated.from_[:10], "%Y-%m-%d").date()
                 b = datetime.strptime(validated.to[:10], "%Y-%m-%d").date()
@@ -304,6 +346,10 @@ def execute_read_tools(
                 p = GetScheduleRangeArgs.model_validate({**args, "from": args.get("from")})
                 a, b = _daterange_bounds(p.from_, p.to)
                 results.append({"tool": tool, "ok": True, "data": svc.free_time_days(a, b)})
+            elif tool == "get_days_without_schedule":
+                p = GetScheduleRangeArgs.model_validate({**args, "from": args.get("from")})
+                a, b = _daterange_bounds(p.from_, p.to)
+                results.append({"tool": tool, "ok": True, "data": svc.days_without_schedule(a, b)})
             elif tool == "analyze_progress":
                 goals = store.read_profile().get("goals", [])
                 results.append(
@@ -333,13 +379,7 @@ def run_prefetch(store: UserStore, calls: list[dict[str, Any]]) -> tuple[list[di
 
 
 def _find_month(store: UserStore, block_id: str) -> str | None:
-    if not block_id:
-        return None
-    for p in store.paths.root.glob("calendar_*.json"):
-        ym = p.stem.replace("calendar_", "")
-        if any(b.get("id") == block_id for b in store.read_calendar_month(ym).get("blocks", [])):
-            return ym
-    return None
+    return store.find_block_month(block_id)
 
 
 def apply_operations_direct(

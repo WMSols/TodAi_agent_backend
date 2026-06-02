@@ -357,20 +357,272 @@
       }
       #chat-panel { border-right: none; }
     }
+
+    #auth-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15, 20, 25, 0.92);
+      padding: 1rem;
+    }
+    #auth-screen.hidden { display: none; }
+    .auth-card {
+      width: min(400px, 100%);
+      background: var(--panel);
+      border: 1px solid #2a3545;
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+    .auth-card h2 { margin: 0 0 0.35rem; font-size: 1.25rem; }
+    .auth-card p.sub { margin: 0 0 1rem; color: var(--muted); font-size: 0.85rem; }
+    .auth-card label { display: block; font-size: 0.75rem; color: var(--muted); margin-bottom: 0.25rem; }
+    .auth-card input {
+      width: 100%;
+      margin-bottom: 0.75rem;
+      padding: 0.5rem 0.65rem;
+      border-radius: 8px;
+      border: 1px solid #2a3545;
+      background: #121922;
+      color: var(--text);
+      font: inherit;
+    }
+    .auth-card button {
+      width: 100%;
+      padding: 0.55rem;
+      margin-bottom: 0.5rem;
+      border-radius: 8px;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      font: inherit;
+    }
+    .auth-card button.primary { background: var(--accent); color: #fff; }
+    .auth-card button.oauth { background: #243047; color: var(--text); border: 1px solid #2a3545; }
+    .auth-card button.link {
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 400;
+    }
+    .auth-divider {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.75rem;
+      margin: 0.75rem 0;
+    }
+    #auth-error { color: #fca5a5; font-size: 0.8rem; min-height: 1.2rem; margin-bottom: 0.5rem; }
+    #auth-status { color: var(--muted); font-size: 0.8rem; margin-bottom: 0.5rem; }
+    #user-chip {
+      font-size: 0.75rem;
+      color: var(--muted);
+      max-width: 12rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #btn-signout {
+      padding: 0.25rem 0.5rem;
+      border-radius: 6px;
+      border: 1px solid #2a3545;
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.72rem;
+      cursor: pointer;
+    }
+    #btn-signout.hidden { display: none; }
+
+    #mode-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1.25rem;
+      border-bottom: 1px solid #2a3545;
+      background: #121922;
+      flex-wrap: wrap;
+    }
+    #mode-bar .mode-bar-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-right: 0.25rem;
+    }
+    .mode-btn {
+      padding: 0.35rem 0.75rem;
+      border-radius: 8px;
+      border: 1px solid #2a3545;
+      background: #1a2332;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .mode-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .mode-btn[data-mode="goal"].active {
+      background: #059669;
+      border-color: #059669;
+    }
+    #goal-plan-chip {
+      font-size: 0.72rem;
+      color: #6ee7b7;
+      font-family: ui-monospace, Consolas, monospace;
+      margin-left: auto;
+    }
+    #goal-plan-chip.hidden { display: none; }
+
+    .goal-setup {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid #2a3545;
+      background: #121922;
+    }
+    .goal-setup.hidden { display: none; }
+    .goal-setup h3 {
+      margin: 0 0 0.5rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #6ee7b7;
+    }
+    .goal-setup label {
+      display: block;
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-bottom: 0.2rem;
+    }
+    .goal-setup input,
+    .goal-setup textarea {
+      width: 100%;
+      margin-bottom: 0.5rem;
+      padding: 0.45rem 0.6rem;
+      border-radius: 8px;
+      border: 1px solid #2a3545;
+      background: var(--panel);
+      color: var(--text);
+      font: inherit;
+    }
+    .goal-setup .goal-actions {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .goal-setup .goal-actions button {
+      padding: 0.35rem 0.65rem;
+      border-radius: 6px;
+      border: 1px solid #2a3545;
+      background: #059669;
+      color: #fff;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .goal-setup .goal-actions button.secondary {
+      background: #243047;
+      color: var(--text);
+    }
+    .auth-tabs {
+      display: flex;
+      gap: 0.35rem;
+      margin-bottom: 1rem;
+    }
+    .auth-tabs button {
+      flex: 1;
+      padding: 0.45rem;
+      border-radius: 8px;
+      border: 1px solid #2a3545;
+      background: #121922;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .auth-tabs button.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .auth-panel.hidden { display: none; }
+    .auth-hint {
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin: -0.35rem 0 0.75rem;
+    }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
+  <div id="auth-screen" class="hidden" aria-hidden="true">
+    <div class="auth-card">
+      <h2 id="auth-title">Welcome to TodAI</h2>
+      <p class="sub">Sign in or create an account. Your calendar and chat are saved to your user in the database.</p>
+      <div class="auth-tabs">
+        <button type="button" id="auth-tab-signin" class="active">Sign in</button>
+        <button type="button" id="auth-tab-signup">Create account</button>
+      </div>
+      <div id="auth-status"></div>
+      <div id="auth-error"></div>
+
+      <div id="auth-panel-signin" class="auth-panel">
+        <label for="auth-username">Username</label>
+        <input type="text" id="auth-username" autocomplete="username" placeholder="Same name you registered with" />
+        <p class="auth-hint">You can also type your email here if you forgot your username.</p>
+        <label for="auth-password">Password</label>
+        <input type="password" id="auth-password" autocomplete="current-password" placeholder="Your password" />
+        <button type="button" class="primary" id="btn-auth-signin">Sign in</button>
+      </div>
+
+      <div id="auth-panel-signup" class="auth-panel hidden">
+        <label for="auth-name">Your name (username)</label>
+        <input type="text" id="auth-name" autocomplete="name" placeholder="e.g. Ali Khan — use this to sign in" />
+        <label for="auth-email-signup">Email</label>
+        <input type="text" id="auth-email-signup" autocomplete="email" placeholder="any format you like" />
+        <label for="auth-password-signup">Password</label>
+        <input type="password" id="auth-password-signup" autocomplete="new-password" placeholder="Choose a password" />
+        <button type="button" class="primary" id="btn-auth-create">Create account</button>
+      </div>
+
+      <div class="auth-divider">or continue with</div>
+      <button type="button" class="oauth" id="btn-auth-google">Google</button>
+      <button type="button" class="oauth" id="btn-auth-apple">Apple</button>
+    </div>
+  </div>
   <div id="file-protocol-warn"></div>
   <header>
     <h1>TodAI</h1>
+    <span id="user-chip" title=""></span>
+    <button type="button" id="btn-signout" class="hidden" title="Sign out">Sign out</button>
     <div id="state-bar">
       <span id="state-pill" class="state-pill state-idle" title="Orchestrator FSM">idle</span>
       <span id="usage-pill" title="Groq API usage">—</span>
       <span id="status-meta">—</span>
     </div>
   </header>
+  <div id="mode-bar" role="tablist" aria-label="Agent mode">
+    <span class="mode-bar-label">Mode</span>
+    <button type="button" class="mode-btn active" data-mode="calendar" role="tab" aria-selected="true">Calendar agent</button>
+    <button type="button" class="mode-btn" data-mode="goal" role="tab" aria-selected="false">Goal planner</button>
+    <span id="goal-plan-chip" class="hidden" title="Active goal plan id"></span>
+  </div>
   <main class="layout">
     <section id="chat-panel">
+      <div id="goal-setup" class="goal-setup hidden" aria-label="Start a goal plan">
+        <h3>New 7-day goal plan</h3>
+        <label for="goal-title">Goal title</label>
+        <input type="text" id="goal-title" placeholder="e.g. Learn Python basics" />
+        <label for="goal-desc">Description (optional)</label>
+        <textarea id="goal-desc" rows="2" placeholder="What you want to achieve this week"></textarea>
+        <div class="goal-actions">
+          <button type="button" id="btn-goal-start">Start plan</button>
+          <button type="button" id="btn-goal-new" class="secondary hidden">New plan</button>
+        </div>
+      </div>
       <ul id="log" aria-live="polite"></ul>
       <div id="toolbar">
         <button type="button" id="btn-reset">Reset data</button>
@@ -395,8 +647,10 @@
     </aside>
   </main>
   <script src="/static/calendar-render.js"></script>
+  <script src="/static/auth.js"></script>
   <script>
-    const userId = new URLSearchParams(location.search).get("user") || "default";
+    let userId = "default";
+    let appReady = false;
     const isFileProtocol = location.protocol === "file:";
     const API_BASE = isFileProtocol ? "" : location.origin;
     const logEl = document.getElementById("log");
@@ -415,7 +669,22 @@
       chat: "Chat",
       schedule_qa: "Schedule",
       schedule_write: "Calendar edit",
+      goal_plan: "Goal planner",
+      goal_interrogate: "Goal Q&A",
+      goal_confirm: "Goal confirm",
+      goal_create: "Goal create",
+      goal_schedule_read: "Goal calendar",
+      goal_goals_list: "Goal list",
+      goal_delete: "Goal delete",
+      goal_edit: "Goal edit",
+      goal_chat: "Goal chat",
     };
+    const APP_MODE_KEY = "todai_app_mode";
+    const goalPlanKey = function () {
+      return "todai_goal_plan_id_" + (userId || "default");
+    };
+    let appMode = "calendar";
+    let goalPlanId = null;
 
     const STATE_HINTS = {
       idle: "Ready for a new message.",
@@ -546,21 +815,30 @@
     function startUsageRefreshPoll() {
       if (usageRefreshTimer) clearInterval(usageRefreshTimer);
       usageRefreshTimer = setInterval(function () {
-        if (isFileProtocol || secondsUntilRateLimit() > 0) return;
+        if (isFileProtocol || !appReady || secondsUntilRateLimit() > 0) return;
         refreshStatus().catch(function () {});
       }, 3000);
     }
 
     function setMetaFromPayload(j) {
-      const mode = j.agent_mode || j.last_agent_mode;
+      const mode = j.agent_mode || j.last_agent_mode || (appMode === "goal" ? "goal_plan" : "");
       const planner = j.planner || (j.debug && j.debug.planner) || "—";
       const route = (j.debug && (j.debug.intent || j.debug.route)) || "";
+      const phase = j.phase || (j.debug && j.debug.phase) || "";
       const parts = [];
-      if (mode) parts.push(MODE_LABELS[mode] || mode);
-      if (route) parts.push(route);
-      if (planner) parts.push(planner);
+      if (appMode === "goal") parts.push("Goal planner");
+      else if (mode) parts.push(MODE_LABELS[mode] || mode);
+      if (phase) parts.push("phase " + phase);
+      if (route && route !== "goal_plan") parts.push(route);
+      if (planner && planner !== "goal_stub") parts.push(planner);
+      else if (appMode === "goal") parts.push("goal_stub");
       statusMeta.textContent = parts.join(" · ") || "—";
-      setUsagePill(j);
+      if (appMode === "calendar") setUsagePill(j);
+      else if (secondsUntilRateLimit() <= 0) {
+        usagePill.textContent = goalPlanId ? "plan " + goalPlanId.slice(0, 8) + "…" : "no plan";
+        usagePill.className = "";
+        usagePill.title = "Goal planner mode — Groq usage shown for calendar agent only";
+      }
     }
 
     function slimServerState(j) {
@@ -568,11 +846,14 @@
       const u = j.api_usage || {};
       const out = {
         state: j.state,
-        mode: j.agent_mode || j.last_agent_mode,
-        planner: j.planner,
-        pipeline: j.pipeline,
+        mode: j.agent_mode || j.last_agent_mode || (appMode === "goal" ? "goal_plan" : undefined),
+        planner: j.planner || (j.debug && j.debug.planner),
+        pipeline: j.pipeline || (appMode === "goal" ? "goal_planner" : undefined),
         schedule_v: j.schedule_version,
       };
+      if (j.phase) out.phase = j.phase;
+      if (j.plan_id) out.plan = String(j.plan_id).slice(0, 8);
+      if (appMode === "goal") out.ui_mode = "goal";
       if (j.pending_proposal_id) out.pending = j.pending_proposal_id;
       if (u.turn_requests != null || u.rpm_used != null) {
         out.groq =
@@ -795,16 +1076,18 @@
       logEl.scrollTop = logEl.scrollHeight;
     }
 
-    function appendAssistantResponse(j, userMessage) {
+    function appendAssistantResponse(j, userMessage, endpoint) {
       if (getApiUsage(j)) lastChatApiUsage = getApiUsage(j);
       applyServerState(j);
       const reply = (j.reply_text || j.assistant_text || "").trim();
       if (reply) {
-        appendChatLog("assistant", reply, { scheduleDisplay: j.schedule_display });
+        appendChatLog("assistant", reply, {
+          scheduleDisplay: j.schedule_display || null,
+        });
       } else if (j.schedule_display) {
         appendChatLog("assistant", "", { scheduleDisplay: j.schedule_display });
       }
-      appendDebugBlock("chat", j, userMessage);
+      appendDebugBlock(endpoint || (isGoalMode() ? "goal-plan/message" : "chat"), j, userMessage);
     }
 
     function setBusy(busy) {
@@ -819,12 +1102,29 @@
       }
     }
 
+    function apiHeaders(extra) {
+      const base =
+        typeof TodaiAuth !== "undefined" && TodaiAuth.authHeaders
+          ? TodaiAuth.authHeaders(extra)
+          : Object.assign({ "Content-Type": "application/json" }, extra || {});
+      return base;
+    }
+
     async function fetchJson(url, options, timeoutMs) {
       const ms = timeoutMs || 120000;
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), ms);
+      const opts = options || {};
+      opts.headers = apiHeaders(opts.headers);
       try {
-        const r = await fetch(url, { ...options, signal: ctrl.signal });
+        const r = await fetch(url, { ...opts, signal: ctrl.signal });
+        if (r.status === 401) {
+          return {
+            assistant_text: "Session expired — please sign in again.",
+            state: "error",
+            debug: { error: "unauthorized" },
+          };
+        }
         const raw = await r.text();
         try {
           return JSON.parse(raw);
@@ -845,8 +1145,98 @@
       }
     }
 
+    function isGoalMode() {
+      return appMode === "goal";
+    }
+
+    function syncModeChrome() {
+      document.querySelectorAll(".mode-btn").forEach(function (btn) {
+        const on = btn.getAttribute("data-mode") === appMode;
+        btn.classList.toggle("active", on);
+        btn.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      const goalSetup = document.getElementById("goal-setup");
+      const planChip = document.getElementById("goal-plan-chip");
+      const btnNew = document.getElementById("btn-goal-new");
+      const ta = document.getElementById("msg");
+      if (isGoalMode()) {
+        goalSetup.classList.toggle("hidden", !!goalPlanId);
+        btnNew.classList.toggle("hidden", !goalPlanId);
+        if (goalPlanId) {
+          planChip.textContent = "plan " + goalPlanId.slice(0, 8) + "…";
+          planChip.classList.remove("hidden");
+          planChip.title = goalPlanId;
+        } else {
+          planChip.classList.add("hidden");
+        }
+        ta.placeholder = goalPlanId
+          ? "Answer the goal agent… Enter to send"
+          : "Start a plan above, or use Start plan";
+        document.getElementById("btn-reset").title = "Resets calendar only (switch to Calendar mode)";
+      } else {
+        goalSetup.classList.add("hidden");
+        planChip.classList.add("hidden");
+        ta.placeholder = "Message… Enter to send";
+        document.getElementById("btn-reset").title = "";
+      }
+      try {
+        sessionStorage.setItem(APP_MODE_KEY, appMode);
+        if (goalPlanId) sessionStorage.setItem(goalPlanKey(), goalPlanId);
+        else sessionStorage.removeItem(goalPlanKey());
+      } catch (e) { /* ignore */ }
+    }
+
+    function setAppMode(mode) {
+      if (mode !== "calendar" && mode !== "goal") return;
+      appMode = mode;
+      syncModeChrome();
+      if (appReady) {
+        if (isGoalMode()) refreshGoalStatus().catch(function () { setStatePill("idle"); });
+        else refreshStatus().catch(function () { setStatePill("idle"); });
+      }
+    }
+
+    function loadGoalPlanFromStorage() {
+      try {
+        goalPlanId = sessionStorage.getItem(goalPlanKey()) || null;
+        const savedMode = sessionStorage.getItem(APP_MODE_KEY);
+        if (savedMode === "goal" || savedMode === "calendar") appMode = savedMode;
+      } catch (e) {
+        goalPlanId = null;
+      }
+    }
+
+    function renderGoalMessages(messages) {
+      logEl.innerHTML = "";
+      (messages || []).forEach(function (m) {
+        if (!m || !m.content) return;
+        appendChatLog(m.role === "user" ? "user" : "assistant", m.content);
+      });
+    }
+
+    async function refreshGoalStatus() {
+      if (isFileProtocol || !appReady) return;
+      if (!goalPlanId) {
+        setStatePill("idle");
+        setMetaFromPayload({ agent_mode: "goal_plan", phase: "no_plan", debug: { route: "goal_plan" } });
+        setServerStateSnapshot({ ui_mode: "goal", mode: "goal_plan", phase: "no_plan", state: "idle" });
+        return;
+      }
+      const j = await fetchJson(
+        apiUrl("/api/goals/plan/" + encodeURIComponent(goalPlanId)),
+        {},
+        15000
+      );
+      applyServerState(j);
+      setServerStateSnapshot(j);
+    }
+
     async function refreshStatus() {
-      if (isFileProtocol) return;
+      if (isFileProtocol || !appReady) return;
+      if (isGoalMode()) {
+        await refreshGoalStatus();
+        return;
+      }
       const j = await fetchJson(
         apiUrl("/api/state?user_id=" + encodeURIComponent(userId)),
         {},
@@ -854,6 +1244,52 @@
       );
       applyServerState(j);
       setServerStateSnapshot(j);
+    }
+
+    async function startGoalPlan() {
+      const title = document.getElementById("goal-title").value.trim();
+      if (!title) {
+        appendChatLog("system", "Enter a goal title first.");
+        return;
+      }
+      const description = document.getElementById("goal-desc").value.trim();
+      setBusy(true);
+      try {
+        const j = await fetchJson(apiUrl("/api/goals/plan/start"), {
+          method: "POST",
+          body: JSON.stringify({ title: title, description: description }),
+        });
+        if (!j.plan_id) {
+          appendChatLog("error", (j.detail || j.assistant_text || "Start failed") + "");
+          appendDebugBlock("goal-plan/start", j, title);
+          return;
+        }
+        goalPlanId = j.plan_id;
+        syncModeChrome();
+        logEl.innerHTML = "";
+        appendAssistantResponse(j, title);
+        await refreshGoalStatus();
+        const st = await fetchJson(
+          apiUrl("/api/goals/plan/" + encodeURIComponent(goalPlanId)),
+          {},
+          15000
+        );
+        renderGoalMessages(st.messages);
+      } catch (err) {
+        setStatePill("error");
+        appendChatLog("error", "Start plan failed: " + err);
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    function clearGoalPlan() {
+      goalPlanId = null;
+      logEl.innerHTML = "";
+      document.getElementById("goal-title").value = "";
+      document.getElementById("goal-desc").value = "";
+      syncModeChrome();
+      refreshGoalStatus().catch(function () {});
     }
 
     function copyAllDebugLog() {
@@ -890,6 +1326,9 @@
       fileWarn.style.display = "block";
       fileWarn.textContent = "Open http://127.0.0.1:8000/ (run python main.py) — not this file directly.";
       document.getElementById("send").disabled = true;
+    } else {
+      document.getElementById("send").disabled = true;
+      document.getElementById("msg").disabled = true;
     }
 
     document.getElementById("btn-copy-log").addEventListener("click", copyAllDebugLog);
@@ -901,34 +1340,58 @@
       }
     });
 
+    document.querySelectorAll(".mode-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        setAppMode(btn.getAttribute("data-mode"));
+      });
+    });
+    document.getElementById("btn-goal-start").addEventListener("click", startGoalPlan);
+    document.getElementById("btn-goal-new").addEventListener("click", function () {
+      if (goalPlanId && !confirm("Start a new goal plan? Chat for the current plan stays in the database.")) return;
+      clearGoalPlan();
+    });
+
     document.getElementById("composer").addEventListener("submit", async (e) => {
       e.preventDefault();
-      if (isFileProtocol) return;
+      if (isFileProtocol || !appReady) return;
       const waitLeft = secondsUntilRateLimit();
-      if (waitLeft > 0) {
+      if (!isGoalMode() && waitLeft > 0) {
         appendChatLog("system", "Please wait " + waitLeft + "s — Groq rate limit.");
         return;
       }
       const ta = document.getElementById("msg");
       const text = ta.value.trim();
       if (!text) return;
+      if (isGoalMode() && !goalPlanId) {
+        appendChatLog("system", "Click Start plan above before chatting.");
+        return;
+      }
       appendChatLog("user", text);
       setStatePill("analyzing");
       ta.value = "";
       setBusy(true);
       try {
-        const j = await fetchJson(apiUrl("/api/chat"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, message: text }),
-        });
-        appendAssistantResponse(j, text);
-        applyRateLimitCooldown(getApiUsage(j));
+        let j;
+        if (isGoalMode()) {
+          j = await fetchJson(apiUrl("/api/goals/plan/message"), {
+            method: "POST",
+            body: JSON.stringify({ plan_id: goalPlanId, message: text }),
+          });
+          appendAssistantResponse(j, text, "goal-plan/message");
+        } else {
+          j = await fetchJson(apiUrl("/api/chat"), {
+            method: "POST",
+            body: JSON.stringify({ user_id: userId, message: text }),
+          });
+          appendAssistantResponse(j, text, "chat");
+          applyRateLimitCooldown(getApiUsage(j));
+        }
         await refreshStatus();
       } catch (err) {
         setStatePill("error");
         appendChatLog("error", "Request failed: " + err);
-        appendDebugBlock("chat", { state: "error", debug: { error: String(err) } }, text);
+        const ep = isGoalMode() ? "goal-plan/message" : "chat";
+        appendDebugBlock(ep, { state: "error", agent_mode: isGoalMode() ? "goal_plan" : "", debug: { error: String(err) } }, text);
       } finally {
         setBusy(false);
         refreshStatus().catch(function () {});
@@ -940,7 +1403,7 @@
       try {
         const r = await fetch(apiUrl("/api/reset"), {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: apiHeaders(),
           body: JSON.stringify({ user_id: userId }),
         });
         const j = await r.json();
@@ -954,9 +1417,184 @@
       }
     });
 
-    if (!isFileProtocol) {
-      refreshStatus().catch(function () { setStatePill("idle"); });
+    function showAuthScreen(show) {
+      const el = document.getElementById("auth-screen");
+      el.classList.toggle("hidden", !show);
+      el.setAttribute("aria-hidden", show ? "false" : "true");
+    }
+
+    function setAuthError(msg) {
+      document.getElementById("auth-error").textContent = msg || "";
+    }
+
+    function setAuthStatus(msg) {
+      document.getElementById("auth-status").textContent = msg || "";
+    }
+
+    function updateUserChrome(authCtx) {
+      const chip = document.getElementById("user-chip");
+      const btnOut = document.getElementById("btn-signout");
+      if (authCtx && authCtx.authRequired && authCtx.user) {
+        chip.textContent = TodaiAuth.userLabel();
+        chip.title = authCtx.user.email || userId;
+        btnOut.classList.remove("hidden");
+      } else if (!authCtx || !authCtx.authRequired) {
+        chip.textContent = "local · " + userId;
+        btnOut.classList.add("hidden");
+      }
+    }
+
+    function setAuthTab(mode) {
+      const signIn = mode === "signin";
+      document.getElementById("auth-tab-signin").classList.toggle("active", signIn);
+      document.getElementById("auth-tab-signup").classList.toggle("active", !signIn);
+      document.getElementById("auth-panel-signin").classList.toggle("hidden", !signIn);
+      document.getElementById("auth-panel-signup").classList.toggle("hidden", signIn);
+      document.getElementById("auth-title").textContent = signIn ? "Sign in" : "Create account";
+      setAuthError("");
+    }
+
+    function finishLogin(onSuccess) {
+      userId = TodaiAuth.userId();
+      if (!userId) {
+        setAuthError("Sign-in succeeded but user id is missing. Try again.");
+        return;
+      }
+      appReady = true;
+      document.getElementById("send").disabled = false;
+      document.getElementById("msg").disabled = false;
+      showAuthScreen(false);
+      setAuthStatus("");
+      onSuccess();
+    }
+
+    function wireAuthForm(onSuccess) {
+      document.getElementById("auth-tab-signin").onclick = function () {
+        setAuthTab("signin");
+      };
+      document.getElementById("auth-tab-signup").onclick = function () {
+        setAuthTab("signup");
+      };
+
+      document.getElementById("btn-auth-signin").onclick = async function () {
+        setAuthError("");
+        const username = document.getElementById("auth-username").value.trim();
+        const password = document.getElementById("auth-password").value;
+        if (!username || !password) {
+          setAuthError("Enter username and password.");
+          return;
+        }
+        setAuthStatus("Signing in…");
+        try {
+          await TodaiAuth.signInUsername(username, password);
+          finishLogin(onSuccess);
+        } catch (e) {
+          setAuthStatus("");
+          setAuthError(e.message || String(e));
+        }
+      };
+
+      document.getElementById("btn-auth-create").onclick = async function () {
+        setAuthError("");
+        const name = document.getElementById("auth-name").value.trim();
+        const email = document.getElementById("auth-email-signup").value.trim();
+        const password = document.getElementById("auth-password-signup").value;
+        if (!name) {
+          setAuthError("Enter your name (username).");
+          return;
+        }
+        if (!email) {
+          setAuthError("Enter your email.");
+          return;
+        }
+        if (!password) {
+          setAuthError("Enter a password.");
+          return;
+        }
+        setAuthStatus("Creating account…");
+        try {
+          await TodaiAuth.signUpAccount(name, email, password);
+          setAuthStatus("Account created. Signing you in…");
+          finishLogin(onSuccess);
+        } catch (e) {
+          setAuthStatus("");
+          setAuthError(e.message || String(e));
+        }
+      };
+      document.getElementById("btn-auth-google").onclick = function () {
+        setAuthError("");
+        TodaiAuth.signInOAuth("google").catch(function (e) {
+          setAuthError(e.message || String(e));
+        });
+      };
+      document.getElementById("btn-auth-apple").onclick = function () {
+        setAuthError("");
+        TodaiAuth.signInOAuth("apple").catch(function (e) {
+          setAuthError(e.message || String(e));
+        });
+      };
+    }
+
+    document.getElementById("btn-signout").addEventListener("click", async function () {
+      if (typeof TodaiAuth !== "undefined") await TodaiAuth.signOut();
+      location.reload();
+    });
+
+    function onAppReady(authCtx) {
+      userId = authCtx.userId || TodaiAuth.userId();
+      loadGoalPlanFromStorage();
+      syncModeChrome();
+      updateUserChrome(authCtx);
+      if (isGoalMode() && goalPlanId) {
+        refreshGoalStatus()
+          .then(function () {
+            return fetchJson(apiUrl("/api/goals/plan/" + encodeURIComponent(goalPlanId)), {}, 15000);
+          })
+          .then(function (st) {
+            renderGoalMessages(st.messages);
+          })
+          .catch(function () { setStatePill("idle"); });
+      } else {
+        refreshStatus().catch(function () { setStatePill("idle"); });
+      }
       startUsageRefreshPoll();
+    }
+
+    async function startApp() {
+      if (isFileProtocol) return;
+      let authCtx;
+      try {
+        const cfg = await TodaiAuth.loadConfig();
+        if (cfg.auth_required) showAuthScreen(true);
+        authCtx = await TodaiAuth.prepare(setAuthStatus);
+      } catch (e) {
+        setAuthError(String(e));
+        showAuthScreen(true);
+        return;
+      }
+      if (authCtx.needsLogin) {
+        if (authCtx.bootstrapError) {
+          setAuthError("Session expired — please sign in again. (" + authCtx.bootstrapError + ")");
+        }
+        setAuthTab("signin");
+        wireAuthForm(function () {
+          onAppReady({
+            authRequired: true,
+            userId: TodaiAuth.userId(),
+            user: { label: TodaiAuth.userLabel() },
+          });
+        });
+        return;
+      }
+      appReady = true;
+      document.getElementById("send").disabled = false;
+      document.getElementById("msg").disabled = false;
+      onAppReady(authCtx);
+      showAuthScreen(false);
+    }
+
+    if (!isFileProtocol) {
+      startApp();
     }
   </script>
 </body>

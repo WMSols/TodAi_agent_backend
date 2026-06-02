@@ -46,6 +46,10 @@ _INDEX_TO_WEEKDAY = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Sa
 _WEEKDAY_NAMES = "|".join(sorted(_WEEKDAY_TO_INDEX.keys(), key=len, reverse=True))
 _WEEKDAY_PATTERN = re.compile(rf"\b({_WEEKDAY_NAMES})\b", re.I)
 _NEXT_WEEKDAY_PATTERN = re.compile(rf"\bnext\s+({_WEEKDAY_NAMES})\b", re.I)
+_THIS_AND_NEXT_WEEKDAY = re.compile(
+    rf"\bthis\s+({_WEEKDAY_NAMES})\s+and\s+(?:on\s+)?next\s+\1\b",
+    re.I,
+)
 _NEXT_MONTH_PATTERN = re.compile(r"\bnext\s+month\b", re.I)
 _NEXT_MONTH_WEEKDAY = re.compile(rf"\bnext\s+month\s+({_WEEKDAY_NAMES})\b", re.I)
 
@@ -53,6 +57,33 @@ _NEXT_MONTH_WEEKDAY = re.compile(rf"\bnext\s+month\s+({_WEEKDAY_NAMES})\b", re.I
 def _next_weekday_on_or_after(today: date, weekday_index: int) -> date:
     delta = (weekday_index - today.weekday()) % 7
     return today + timedelta(days=delta)
+
+
+def message_has_next_named_weekday(message: str) -> bool:
+    return bool(_NEXT_WEEKDAY_PATTERN.search(message or ""))
+
+
+def message_has_whole_week_phrase(message: str) -> bool:
+    m = (message or "").lower()
+    return any(
+        p in m
+        for p in (
+            "next week",
+            "next all week",
+            "all of next week",
+            "all next week",
+            "coming week",
+            "this week",
+        )
+    )
+
+
+def single_day_iso_from_anchor(date_anchor: dict[str, Any] | None) -> str | None:
+    mentioned = (date_anchor or {}).get("mentioned_weekdays") or {}
+    if len(mentioned) != 1:
+        return None
+    iso = str(next(iter(mentioned.values())))[:10]
+    return iso if len(iso) == 10 else None
 
 
 def _month_summary(anchor: date) -> dict[str, Any]:
@@ -120,6 +151,18 @@ def weekdays_in_range(start: date, end: date, weekday_index: int) -> list[dict[s
 def weekdays_in_agent_window(today: date, weekday_index: int) -> list[dict[str, str]]:
     win_start, win_end = agent_window_bounds(today)
     return weekdays_in_range(win_start, win_end, weekday_index)
+
+
+def _resolve_next_named_weekday_iso(today: date, weekday_index: int) -> str | None:
+    """\"next saturday\" on Friday → second Saturday in agent window (e.g. 30 May), not 23 May."""
+    options = weekdays_in_agent_window(today, weekday_index)
+    if len(options) >= 2:
+        return options[1]["iso"]
+    if len(options) == 1:
+        d0 = date.fromisoformat(options[0]["iso"][:10])
+        d1 = d0 + timedelta(days=7)
+        return _cap_weekday_to_agent_window(d1, today)
+    return None
 
 
 def _shift_calendar_month_start(today: date, delta_months: int) -> tuple[date, date]:
@@ -191,15 +234,30 @@ def resolve_weekday_context(
                     found[canonical] = iso
             used_spans.append(match.span())
 
-    for match in _NEXT_WEEKDAY_PATTERN.finditer(text):
+    for match in _THIS_AND_NEXT_WEEKDAY.finditer(text):
         key = match.group(1).lower()
         idx = _WEEKDAY_TO_INDEX.get(key)
         if idx is None:
             continue
         canonical = _INDEX_TO_WEEKDAY[idx].lower()
-        first = _next_weekday_on_or_after(today, idx)
-        d = first + timedelta(days=7) if first == today else first
-        iso = _cap_weekday_to_agent_window(d, today)
+        options = weekdays_in_agent_window(today, idx)
+        if len(options) >= 2:
+            candidates[canonical] = options
+        elif len(options) == 1:
+            found[canonical] = options[0]["iso"]
+        used_spans.append(match.span())
+
+    for match in _NEXT_WEEKDAY_PATTERN.finditer(text):
+        if _span_used(match.span(), used_spans):
+            continue
+        key = match.group(1).lower()
+        idx = _WEEKDAY_TO_INDEX.get(key)
+        if idx is None:
+            continue
+        canonical = _INDEX_TO_WEEKDAY[idx].lower()
+        if canonical in found or canonical in candidates:
+            continue
+        iso = _resolve_next_named_weekday_iso(today, idx)
         if iso:
             found[canonical] = iso
         used_spans.append(match.span())

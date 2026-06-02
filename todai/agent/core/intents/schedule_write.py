@@ -51,9 +51,9 @@ def handle(ctx: TurnContext) -> IntentResult:
     if months and not apply_errors:
         if not reply:
             reply = "Done — your calendar was updated."
-    elif reply_is_clarifying(reply):
+    elif reply_is_clarifying(reply) and not _CLAIMS_SAVED.search(reply or ""):
         pass
-    elif operations or (reply and _CLAIMS_SAVED.search(reply)):
+    elif not months and (operations or _CLAIMS_SAVED.search(reply or "")):
         reply = _write_failed_reply(had_operations=bool(operations), apply_errors=apply_errors)
         ctx.trace.append({"phase": "write_not_saved", "months": months})
     elif not reply:
