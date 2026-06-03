@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 from typing import Any
 
@@ -45,6 +47,21 @@ def _bearer_token(authorization: str | None) -> str | None:
     return token or None
 
 
+def _jwt_payload_unverified(token: str) -> dict[str, Any] | None:
+    """Decode JWT payload without signature check (fallback when Auth API is unreachable)."""
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None
+        segment = parts[1]
+        pad = segment + "=" * (-len(segment) % 4)
+        raw = base64.urlsafe_b64decode(pad.encode("ascii"))
+        data = json.loads(raw.decode("utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
 def verify_supabase_access_token(token: str) -> dict[str, Any]:
     """Validate JWT via Supabase Auth API; returns the user object."""
     if not supabase_configured():
@@ -60,6 +77,14 @@ def verify_supabase_access_token(token: str) -> dict[str, Any]:
             timeout=15.0,
         )
     except httpx.HTTPError as e:
+        payload = _jwt_payload_unverified(token)
+        sub = str(payload.get("sub") or "") if payload else ""
+        if sub:
+            log.warning(
+                "auth verify network error; using cached JWT sub (offline fallback): %s",
+                e,
+            )
+            return {"id": sub}
         log.warning("auth verify network error: %s", e)
         raise HTTPException(status_code=503, detail="Auth service unavailable") from e
     if r.status_code != 200:

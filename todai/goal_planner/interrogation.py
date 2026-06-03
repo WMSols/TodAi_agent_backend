@@ -86,6 +86,54 @@ def current_step(session: dict[str, Any]) -> StepId | None:
     return session.get("intake_step") or next_missing_step(session.get("answers") or {})
 
 
+def question_for_step(step: StepId, session: dict[str, Any] | None = None) -> str:
+    """Contextual intake question using goal title / description when available."""
+    session = session or {}
+    title = (session.get("title") or "").strip()
+    desc = (session.get("description") or "").strip()
+    goal_line = ""
+    if title:
+        goal_line = f"**Your goal:** {title}"
+        if desc:
+            goal_line += f"\n_{desc[:200]}{'…' if len(desc) > 200 else ''}_"
+
+    if step == "objective" and title:
+        base = (
+            "**Question 1 of 4 — Objective**\n"
+            f"What do you want to achieve in the next 7 days for **{title}**? "
+            "Be specific (e.g. daily habits, measurable outcome).\n"
+            "_Reply **ok** to use your goal title as the objective, or write your own._"
+        )
+        return f"{goal_line}\n\n{base}" if goal_line else base
+
+    if step == "difficulty" and title:
+        return (
+            (f"{goal_line}\n\n" if goal_line else "")
+            + f"**Question 2 of 4 — Difficulty**\n"
+            f"How challenging should **{title}** feel this week? "
+            "Reply with exactly one word: **easy**, **medium**, or **hard**."
+        )
+
+    if step == "tasks_per_day" and title:
+        return (
+            (f"{goal_line}\n\n" if goal_line else "")
+            + f"**Question 3 of 4 — Tasks per day**\n"
+            f"How many separate tasks per day for **{title}**? "
+            "Send one number from **1** to **5** (example: `2`)."
+        )
+
+    if step == "minutes_per_day":
+        hint = f" for **{title}**" if title else ""
+        return (
+            (f"{goal_line}\n\n" if goal_line else "")
+            + f"**Question 4 of 4 — Time per day**\n"
+            f"How many minutes per day can you spend{hint}?\n"
+            "Examples: `45`, `1 hour`, or `10 to 15 minutes`."
+        )
+
+    return QUESTIONS[step]
+
+
 def parse_answer(step: StepId, text: str, *, default_objective: str = "") -> ParseResult:
     raw = (text or "").strip()
     if not raw:
@@ -262,8 +310,80 @@ def parse_confirmation(text: str) -> Literal["yes", "no", "unclear"]:
     t = (text or "").strip().lower()
     if t in ("yes", "y", "ok", "okay", "sure", "go", "create", "generate", "do it", "confirm"):
         return "yes"
+    if re.match(r"^okay[,.!\s]*$", t):
+        return "yes"
     if t in ("no", "n", "wait", "stop", "cancel"):
         return "no"
     if re.search(r"\b(yes|yeah|yep|go ahead|looks good)\b", t):
         return "yes"
     return "unclear"
+
+
+def try_apply_confirm_edits(
+    message: str,
+    answers: dict[str, Any],
+    *,
+    default_objective: str = "",
+) -> tuple[dict[str, Any], str | None]:
+    """
+    Apply inline corrections during confirm (e.g. '1 task per day', 'change difficulty to hard').
+    Returns (updated answers, short ack) or unchanged if nothing parsed.
+    """
+    text = (message or "").strip()
+    if not text:
+        return answers, None
+
+    acks: list[str] = []
+    lower = text.lower()
+
+    if re.search(r"\b(objective|goal)\b", lower) or (
+        len(text) > 12 and "task" not in lower and "minute" not in lower and "difficult" not in lower
+    ):
+        r = parse_answer("objective", text, default_objective=default_objective)
+        if r.valid:
+            answers["objective"] = {
+                "valid": True,
+                "parsed": r.parsed,
+                "raw": text,
+                "display": r.display or str(r.parsed)[:80],
+            }
+            acks.append(f"objective → {answers['objective']['display']}")
+
+    if re.search(r"\b(task|tasks)\b.*\b(day|daily|per)\b|\bper day\b", lower) or re.search(
+        r"\b\d\b.*\btask", lower
+    ):
+        r = parse_answer("tasks_per_day", text)
+        if r.valid:
+            answers["tasks_per_day"] = {
+                "valid": True,
+                "parsed": r.parsed,
+                "raw": text,
+                "display": r.display or str(r.parsed),
+            }
+            acks.append(f"tasks/day → **{answers['tasks_per_day']['display']}**")
+
+    if re.search(r"\b(minute|hour|time|mins?)\b", lower) or re.search(r"\b\d+\s*h", lower):
+        r = parse_answer("minutes_per_day", text)
+        if r.valid:
+            answers["minutes_per_day"] = {
+                "valid": True,
+                "parsed": r.parsed,
+                "raw": text,
+                "display": r.display or f"{r.parsed} minutes per day",
+            }
+            acks.append(f"time/day → {answers['minutes_per_day']['display']}")
+
+    if re.search(r"\b(easy|medium|hard|difficult|intensity)\b", lower):
+        r = parse_answer("difficulty", text)
+        if r.valid:
+            answers["difficulty"] = {
+                "valid": True,
+                "parsed": r.parsed,
+                "raw": text,
+                "display": r.display or str(r.parsed),
+            }
+            acks.append(f"difficulty → **{answers['difficulty']['display']}**")
+
+    if not acks:
+        return answers, None
+    return answers, "; ".join(acks)

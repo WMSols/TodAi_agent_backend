@@ -78,7 +78,7 @@
       min-height: 0;
       border-right: 1px solid #2a3545;
     }
-    #log {
+    .chat-log {
       flex: 1;
       overflow-y: auto;
       padding: 1rem 1.25rem;
@@ -86,9 +86,10 @@
       margin: 0;
       font-size: 0.9rem;
     }
-    #log li { margin-bottom: 0.75rem; }
-    #log li.user { text-align: right; }
-    #log li.user .line {
+    .chat-log.hidden { display: none; }
+    .chat-log li { margin-bottom: 0.75rem; }
+    .chat-log li.user { text-align: right; }
+    .chat-log li.user .line {
       display: inline-block;
       max-width: 90%;
       text-align: left;
@@ -98,7 +99,7 @@
       white-space: pre-wrap;
       line-height: 1.45;
     }
-    #log li.assistant .line {
+    .chat-log li.assistant .line {
       display: block;
       max-width: 95%;
       background: #1e2a3d;
@@ -108,8 +109,118 @@
       white-space: pre-wrap;
       line-height: 1.45;
     }
-    #log li.system { color: var(--muted); font-size: 0.72rem; font-family: ui-monospace, Consolas, monospace; }
-    #log li.error { color: #fca5a5; font-size: 0.85rem; }
+    .chat-log li.system { color: var(--muted); font-size: 0.72rem; font-family: ui-monospace, Consolas, monospace; }
+    .chat-log li.error { color: #fca5a5; font-size: 0.85rem; }
+
+    #log-goal { background: linear-gradient(180deg, #0d1218 0%, #0f151d 100%); }
+    #log-goal li.goal-welcome {
+      margin: 0.5rem 0 1rem;
+      padding: 0;
+      list-style: none;
+    }
+    .goal-welcome-card {
+      background: #15202b;
+      border: 1px solid #2a4035;
+      border-radius: 12px;
+      padding: 1rem 1.1rem;
+      color: var(--text);
+      line-height: 1.5;
+      font-size: 0.88rem;
+    }
+    .goal-welcome-card h4 {
+      margin: 0 0 0.45rem;
+      font-size: 0.95rem;
+      color: #6ee7b7;
+      font-weight: 600;
+    }
+    .goal-welcome-card ul {
+      margin: 0.5rem 0 0;
+      padding-left: 1.1rem;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    #log-goal li.user .line {
+      background: #064e3b;
+      border: 1px solid #047857;
+    }
+    #log-goal li.assistant .line {
+      background: #15202b;
+      border-color: #2a4035;
+    }
+    #log-goal li.system {
+      text-align: center;
+      font-family: inherit;
+      font-size: 0.8rem;
+    }
+    .goal-plan-switched {
+      color: #6ee7b7;
+      font-size: 0.75rem;
+      margin-top: 0.35rem;
+    }
+
+    #goal-sub-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.45rem 1.25rem;
+      border-bottom: 1px solid #2a3545;
+      background: #0f151d;
+      flex-wrap: wrap;
+    }
+    #goal-sub-bar.hidden { display: none; }
+    #goal-sub-bar .mode-bar-label { margin-right: 0.15rem; }
+    .goal-sub-btn {
+      padding: 0.3rem 0.65rem;
+      border-radius: 8px;
+      border: 1px solid #2a3545;
+      background: #1a2332;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .goal-sub-btn.active {
+      background: #047857;
+      border-color: #059669;
+      color: #fff;
+    }
+    .goal-chat-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      border-bottom: 1px solid #2a3545;
+      background: #121922;
+      flex-wrap: wrap;
+    }
+    .goal-chat-bar.hidden { display: none; }
+    .goal-chat-bar label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    #goal-plan-select {
+      flex: 1;
+      min-width: 12rem;
+      max-width: 28rem;
+      padding: 0.35rem 0.5rem;
+      border-radius: 8px;
+      border: 1px solid #2a3545;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 0.8rem;
+    }
+    #btn-goal-refresh-plans {
+      padding: 0.3rem 0.55rem;
+      border-radius: 6px;
+      border: 1px solid #2a3545;
+      background: #243047;
+      color: var(--text);
+      font-size: 0.75rem;
+      cursor: pointer;
+    }
 
     #debug-panel {
       display: flex;
@@ -491,6 +602,12 @@
       font-weight: 600;
       color: #6ee7b7;
     }
+    .goal-setup-hint {
+      margin: 0 0 0.6rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
     .goal-setup label {
       display: block;
       font-size: 0.72rem;
@@ -610,20 +727,32 @@
     <button type="button" class="mode-btn" data-mode="goal" role="tab" aria-selected="false">Goal planner</button>
     <span id="goal-plan-chip" class="hidden" title="Active goal plan id"></span>
   </div>
+  <div id="goal-sub-bar" class="hidden" role="tablist" aria-label="Goal planner view">
+    <span class="mode-bar-label">Goal</span>
+    <button type="button" class="goal-sub-btn active" data-goal-sub="chat" role="tab" aria-selected="true">My goals</button>
+    <button type="button" class="goal-sub-btn" data-goal-sub="new" role="tab" aria-selected="false">New goal</button>
+  </div>
   <main class="layout">
     <section id="chat-panel">
+      <div id="goal-chat-bar" class="goal-chat-bar hidden" aria-label="Select goal plan">
+        <label for="goal-plan-select">Plan</label>
+        <select id="goal-plan-select" title="Choose a week plan to chat with"></select>
+        <button type="button" id="btn-goal-refresh-plans" title="Reload plan list">Refresh</button>
+      </div>
       <div id="goal-setup" class="goal-setup hidden" aria-label="Start a goal plan">
         <h3>New 7-day goal plan</h3>
+        <p class="goal-setup-hint">AI reads your title and description, asks tailored questions, then builds a 7-day task plan. Use <strong>My goals</strong> to chat with plans that already have tasks.</p>
         <label for="goal-title">Goal title</label>
         <input type="text" id="goal-title" placeholder="e.g. Learn Python basics" />
         <label for="goal-desc">Description (optional)</label>
         <textarea id="goal-desc" rows="2" placeholder="What you want to achieve this week"></textarea>
         <div class="goal-actions">
           <button type="button" id="btn-goal-start">Start plan</button>
-          <button type="button" id="btn-goal-new" class="secondary hidden">New plan</button>
+          <button type="button" id="btn-goal-clear-form" class="secondary">Clear form</button>
         </div>
       </div>
-      <ul id="log" aria-live="polite"></ul>
+      <ul id="log-calendar" class="chat-log" aria-live="polite"></ul>
+      <ul id="log-goal" class="chat-log hidden" aria-live="polite"></ul>
       <div id="toolbar">
         <button type="button" id="btn-reset">Reset data</button>
       </div>
@@ -653,7 +782,8 @@
     let appReady = false;
     const isFileProtocol = location.protocol === "file:";
     const API_BASE = isFileProtocol ? "" : location.origin;
-    const logEl = document.getElementById("log");
+    const logCalendarEl = document.getElementById("log-calendar");
+    const logGoalEl = document.getElementById("log-goal");
     const debugLogEl = document.getElementById("debug-log");
     const serverStateEl = document.getElementById("server-state");
     const statePill = document.getElementById("state-pill");
@@ -674,17 +804,31 @@
       goal_confirm: "Goal confirm",
       goal_create: "Goal create",
       goal_schedule_read: "Goal calendar",
+      goal_manage: "Goal manage",
       goal_goals_list: "Goal list",
       goal_delete: "Goal delete",
       goal_edit: "Goal edit",
       goal_chat: "Goal chat",
+      goal_groq_chat: "Goal chat (AI)",
     };
     const APP_MODE_KEY = "todai_app_mode";
+    const GOAL_SUB_MODE_KEY = "todai_goal_sub_mode";
     const goalPlanKey = function () {
       return "todai_goal_plan_id_" + (userId || "default");
     };
     let appMode = "calendar";
+    let goalSubMode = "chat";
     let goalPlanId = null;
+    let goalPlansCache = [];
+
+    function getActiveLogEl() {
+      return isGoalMode() ? logGoalEl : logCalendarEl;
+    }
+
+    function showActiveLogPanel() {
+      logCalendarEl.classList.toggle("hidden", isGoalMode());
+      logGoalEl.classList.toggle("hidden", !isGoalMode());
+    }
 
     const STATE_HINTS = {
       idle: "Ready for a new message.",
@@ -755,18 +899,18 @@
       if (secondsUntilRateLimit() > 0) return;
       let u = getApiUsage(j);
       if (u && u.turn_requests > 0) lastChatApiUsage = u;
-      if (u && (!u.turn_requests || u.turn_requests === 0) && lastChatApiUsage) {
+      if (!u) {
+        if (lastChatApiUsage) {
+          u = Object.assign({}, lastChatApiUsage);
+        } else {
+          return;
+        }
+      } else if ((!u.turn_requests || u.turn_requests === 0) && lastChatApiUsage) {
         u = Object.assign({}, u, {
           turn_requests: lastChatApiUsage.turn_requests,
           turn_phases: lastChatApiUsage.turn_phases,
           turn_tokens: lastChatApiUsage.turn_tokens,
         });
-      }
-      if (!u) {
-        usagePill.textContent = "—";
-        usagePill.className = "";
-        usagePill.title = "Groq free tier: RPM, TPM, RPD, TPD";
-        return;
       }
       applyRateLimitCooldown(u);
       if (secondsUntilRateLimit() > 0) return;
@@ -833,11 +977,8 @@
       if (planner && planner !== "goal_stub") parts.push(planner);
       else if (appMode === "goal") parts.push("goal_stub");
       statusMeta.textContent = parts.join(" · ") || "—";
-      if (appMode === "calendar") setUsagePill(j);
-      else if (secondsUntilRateLimit() <= 0) {
-        usagePill.textContent = goalPlanId ? "plan " + goalPlanId.slice(0, 8) + "…" : "no plan";
-        usagePill.className = "";
-        usagePill.title = "Goal planner mode — Groq usage shown for calendar agent only";
+      if (appMode === "calendar" || appMode === "goal") {
+        if (getApiUsage(j)) setUsagePill(j);
       }
     }
 
@@ -1058,7 +1199,8 @@
       setMetaFromPayload(j || {});
     }
 
-    function appendChatLog(kind, text, extras) {
+    function appendChatLog(kind, text, extras, logRoot) {
+      const root = logRoot || getActiveLogEl();
       const li = document.createElement("li");
       li.className = kind;
       if (kind === "system" || kind === "error") {
@@ -1072,20 +1214,86 @@
           li.appendChild(renderScheduleDisplay(extras.scheduleDisplay, { hideTitle: !!text }));
         }
       }
-      logEl.appendChild(li);
-      logEl.scrollTop = logEl.scrollHeight;
+      root.appendChild(li);
+      root.scrollTop = root.scrollHeight;
+    }
+
+    function syncResolvedPlanFromResponse(j) {
+      if (!j || !isGoalMode()) return;
+      const resolved = j.resolved_plan_id || j.plan_id;
+      if (!resolved || resolved === goalPlanId) return;
+      goalPlanId = String(resolved);
+      const sel = document.getElementById("goal-plan-select");
+      if (sel && sel.querySelector('option[value="' + goalPlanId + '"]')) {
+        sel.value = goalPlanId;
+      }
+      try {
+        sessionStorage.setItem(goalPlanKey(), goalPlanId);
+      } catch (e) { /* ignore */ }
+      syncModeChrome();
+    }
+
+    function clearGoalWelcomeCard() {
+      const w = logGoalEl.querySelector("li.goal-welcome");
+      if (w) w.remove();
+    }
+
+    function showGoalWelcome(planLabel) {
+      logGoalEl.innerHTML = "";
+      const li = document.createElement("li");
+      li.className = "goal-welcome";
+      const card = document.createElement("div");
+      card.className = "goal-welcome-card";
+      const title = planLabel
+        ? "Chat about: " + planLabel
+        : "My goals";
+      card.innerHTML =
+        "<h4>" +
+        title +
+        "</h4>" +
+        "<p>Ask in plain language — the agent picks the right plan when you mention a goal by name.</p>" +
+        "<ul>" +
+        "<li>Review progress or list goals</li>" +
+        "<li>Show my plan / schedule</li>" +
+        "<li>Delete or adjust a plan (confirmation required)</li>" +
+        "</ul>";
+      li.appendChild(card);
+      logGoalEl.appendChild(li);
     }
 
     function appendAssistantResponse(j, userMessage, endpoint) {
       if (getApiUsage(j)) lastChatApiUsage = getApiUsage(j);
       applyServerState(j);
+      syncResolvedPlanFromResponse(j);
+      if (isGoalMode() && j.goal_removed) {
+        goalPlanId = null;
+        try {
+          sessionStorage.removeItem(goalPlanKey());
+        } catch (e) { /* ignore */ }
+        loadGoalPlansList()
+          .then(function () {
+            showGoalWelcome("");
+            syncModeChrome();
+          })
+          .catch(function () {});
+      }
       const reply = (j.reply_text || j.assistant_text || "").trim();
+      const logRoot = isGoalMode() ? logGoalEl : null;
       if (reply) {
-        appendChatLog("assistant", reply, {
-          scheduleDisplay: j.schedule_display || null,
-        });
+        appendChatLog(
+          "assistant",
+          reply,
+          { scheduleDisplay: j.schedule_display || null },
+          logRoot
+        );
+        if (isGoalMode() && j.plan_resolved && j.debug && j.debug.hint_plan_id) {
+          const note = document.createElement("li");
+          note.className = "system";
+          note.textContent = "Switched to the plan that matches your message.";
+          logGoalEl.appendChild(note);
+        }
       } else if (j.schedule_display) {
-        appendChatLog("assistant", "", { scheduleDisplay: j.schedule_display });
+        appendChatLog("assistant", "", { scheduleDisplay: j.schedule_display }, logRoot);
       }
       appendDebugBlock(endpoint || (isGoalMode() ? "goal-plan/message" : "chat"), j, userMessage);
     }
@@ -1097,8 +1305,6 @@
       if (busy) {
         setStatePill("analyzing");
         statusMeta.textContent = "Thinking…";
-        usagePill.textContent = "…";
-        usagePill.className = "";
       }
     }
 
@@ -1149,19 +1355,67 @@
       return appMode === "goal";
     }
 
+    function isGoalChatSubMode() {
+      return goalSubMode === "chat";
+    }
+
+    function planOptionLabel(p) {
+      const prog = p.progress || {};
+      const pct = prog.percent != null ? prog.percent : 0;
+      const done = prog.done != null ? prog.done : 0;
+      const total = prog.total != null ? prog.total : 0;
+      const st = (p.status || "draft").toString();
+      return (
+        (p.start_date || "?") +
+        " → " +
+        (p.end_date || "?") +
+        " [" +
+        st +
+        "] " +
+        done +
+        "/" +
+        total +
+        " (" +
+        pct +
+        "%)"
+      );
+    }
+
+    function syncGoalSubChrome() {
+      document.querySelectorAll(".goal-sub-btn").forEach(function (btn) {
+        const on = btn.getAttribute("data-goal-sub") === goalSubMode;
+        btn.classList.toggle("active", on);
+        btn.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      const subBar = document.getElementById("goal-sub-bar");
+      const chatBar = document.getElementById("goal-chat-bar");
+      const goalSetup = document.getElementById("goal-setup");
+      if (!isGoalMode()) {
+        subBar.classList.add("hidden");
+        chatBar.classList.add("hidden");
+        goalSetup.classList.add("hidden");
+        return;
+      }
+      subBar.classList.remove("hidden");
+      const inChat = isGoalChatSubMode();
+      chatBar.classList.toggle("hidden", !inChat);
+      goalSetup.classList.toggle("hidden", inChat);
+      try {
+        sessionStorage.setItem(GOAL_SUB_MODE_KEY, goalSubMode);
+      } catch (e) { /* ignore */ }
+    }
+
     function syncModeChrome() {
       document.querySelectorAll(".mode-btn").forEach(function (btn) {
         const on = btn.getAttribute("data-mode") === appMode;
         btn.classList.toggle("active", on);
         btn.setAttribute("aria-selected", on ? "true" : "false");
       });
-      const goalSetup = document.getElementById("goal-setup");
       const planChip = document.getElementById("goal-plan-chip");
-      const btnNew = document.getElementById("btn-goal-new");
       const ta = document.getElementById("msg");
+      showActiveLogPanel();
+      syncGoalSubChrome();
       if (isGoalMode()) {
-        goalSetup.classList.toggle("hidden", !!goalPlanId);
-        btnNew.classList.toggle("hidden", !goalPlanId);
         if (goalPlanId) {
           planChip.textContent = "plan " + goalPlanId.slice(0, 8) + "…";
           planChip.classList.remove("hidden");
@@ -1169,12 +1423,17 @@
         } else {
           planChip.classList.add("hidden");
         }
-        ta.placeholder = goalPlanId
-          ? "Answer the goal agent… Enter to send"
-          : "Start a plan above, or use Start plan";
+        if (isGoalChatSubMode()) {
+          ta.placeholder = goalPlanId
+            ? "Ask about your goals, plan, schedule… Enter to send"
+            : "Select a plan above, or create one under New goal";
+        } else {
+          ta.placeholder = goalPlanId
+            ? "Answer the AI setup questions… Enter to send"
+            : "Enter title + Start plan, then answer questions here";
+        }
         document.getElementById("btn-reset").title = "Resets calendar only (switch to Calendar mode)";
       } else {
-        goalSetup.classList.add("hidden");
         planChip.classList.add("hidden");
         ta.placeholder = "Message… Enter to send";
         document.getElementById("btn-reset").title = "";
@@ -1186,14 +1445,44 @@
       } catch (e) { /* ignore */ }
     }
 
+    function setGoalSubMode(sub) {
+      if (sub !== "chat" && sub !== "new") return;
+      goalSubMode = sub;
+      syncModeChrome();
+      if (!appReady || !isGoalMode()) return;
+      if (isGoalChatSubMode()) {
+        loadGoalPlansList()
+          .then(function () {
+            return loadGoalPlanChat();
+          })
+          .catch(function () {
+            setStatePill("idle");
+          });
+      } else {
+        refreshGoalStatus().catch(function () { setStatePill("idle"); });
+      }
+    }
+
     function setAppMode(mode) {
       if (mode !== "calendar" && mode !== "goal") return;
       appMode = mode;
       syncModeChrome();
-      if (appReady) {
-        if (isGoalMode()) refreshGoalStatus().catch(function () { setStatePill("idle"); });
-        else refreshStatus().catch(function () { setStatePill("idle"); });
+      if (!appReady) return;
+      if (isGoalMode()) {
+        enterGoalPlannerUi().catch(function () { setStatePill("idle"); });
+      } else {
+        refreshStatus().catch(function () { setStatePill("idle"); });
       }
+    }
+
+    async function enterGoalPlannerUi() {
+      if (isGoalChatSubMode()) {
+        await loadGoalPlansList();
+        await loadGoalPlanChat();
+      } else {
+        logGoalEl.innerHTML = "";
+      }
+      await refreshGoalStatus();
     }
 
     function loadGoalPlanFromStorage() {
@@ -1201,17 +1490,84 @@
         goalPlanId = sessionStorage.getItem(goalPlanKey()) || null;
         const savedMode = sessionStorage.getItem(APP_MODE_KEY);
         if (savedMode === "goal" || savedMode === "calendar") appMode = savedMode;
+        const savedSub = sessionStorage.getItem(GOAL_SUB_MODE_KEY);
+        if (savedSub === "chat" || savedSub === "new") goalSubMode = savedSub;
       } catch (e) {
         goalPlanId = null;
+        goalSubMode = "chat";
       }
     }
 
-    function renderGoalMessages(messages) {
-      logEl.innerHTML = "";
-      (messages || []).forEach(function (m) {
-        if (!m || !m.content) return;
-        appendChatLog(m.role === "user" ? "user" : "assistant", m.content);
+    function populateGoalPlanSelect(plans) {
+      const sel = document.getElementById("goal-plan-select");
+      sel.innerHTML = "";
+      if (!plans.length) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No plans yet — use New goal";
+        sel.appendChild(opt);
+        return;
+      }
+      plans.forEach(function (p) {
+        const opt = document.createElement("option");
+        opt.value = String(p.id || "");
+        opt.textContent = planOptionLabel(p);
+        sel.appendChild(opt);
       });
+    }
+
+    async function loadGoalPlansList() {
+      if (isFileProtocol || !appReady) return;
+      const j = await fetchJson(apiUrl("/api/goals/plan/plans"), {}, 15000);
+      goalPlansCache = j.plans || [];
+      populateGoalPlanSelect(goalPlansCache);
+      const sel = document.getElementById("goal-plan-select");
+      if (!goalPlansCache.length) {
+        goalPlanId = null;
+        try {
+          sessionStorage.removeItem(goalPlanKey());
+        } catch (e) { /* ignore */ }
+        return;
+      }
+      const ids = goalPlansCache.map(function (p) { return String(p.id); });
+      if (!goalPlanId || ids.indexOf(goalPlanId) < 0) {
+        const active = goalPlansCache.find(function (p) {
+          return (p.status || "").toLowerCase() === "active";
+        });
+        goalPlanId = String((active || goalPlansCache[0]).id);
+      }
+      sel.value = goalPlanId;
+      try {
+        sessionStorage.setItem(goalPlanKey(), goalPlanId);
+      } catch (e) { /* ignore */ }
+      syncModeChrome();
+    }
+
+    function goalPlanLabelForId(planId) {
+      const p = (goalPlansCache || []).find(function (x) {
+        return String(x.id) === String(planId);
+      });
+      return p ? planOptionLabel(p) : "";
+    }
+
+    async function loadGoalPlanChat() {
+      if (!isGoalMode() || !isGoalChatSubMode()) return;
+      if (!goalPlanId) {
+        showGoalWelcome("");
+        return;
+      }
+      const st = await fetchJson(
+        apiUrl(
+          "/api/goals/plan/" +
+            encodeURIComponent(goalPlanId) +
+            "?include_messages=false"
+        ),
+        {},
+        15000
+      );
+      applyServerState(st);
+      setServerStateSnapshot(st);
+      showGoalWelcome(goalPlanLabelForId(goalPlanId));
     }
 
     async function refreshGoalStatus() {
@@ -1223,7 +1579,11 @@
         return;
       }
       const j = await fetchJson(
-        apiUrl("/api/goals/plan/" + encodeURIComponent(goalPlanId)),
+        apiUrl(
+          "/api/goals/plan/" +
+            encodeURIComponent(goalPlanId) +
+            "?include_messages=false"
+        ),
         {},
         15000
       );
@@ -1235,6 +1595,12 @@
       if (isFileProtocol || !appReady) return;
       if (isGoalMode()) {
         await refreshGoalStatus();
+        const usageState = await fetchJson(
+          apiUrl("/api/state?user_id=" + encodeURIComponent(userId)),
+          {},
+          15000
+        );
+        if (getApiUsage(usageState)) setUsagePill(usageState);
         return;
       }
       const j = await fetchJson(
@@ -1265,16 +1631,12 @@
           return;
         }
         goalPlanId = j.plan_id;
+        goalSubMode = "new";
         syncModeChrome();
-        logEl.innerHTML = "";
-        appendAssistantResponse(j, title);
+        logGoalEl.innerHTML = "";
+        await loadGoalPlansList();
+        appendAssistantResponse(j, title, "goal-plan/start");
         await refreshGoalStatus();
-        const st = await fetchJson(
-          apiUrl("/api/goals/plan/" + encodeURIComponent(goalPlanId)),
-          {},
-          15000
-        );
-        renderGoalMessages(st.messages);
       } catch (err) {
         setStatePill("error");
         appendChatLog("error", "Start plan failed: " + err);
@@ -1283,13 +1645,9 @@
       }
     }
 
-    function clearGoalPlan() {
-      goalPlanId = null;
-      logEl.innerHTML = "";
+    function clearNewGoalForm() {
       document.getElementById("goal-title").value = "";
       document.getElementById("goal-desc").value = "";
-      syncModeChrome();
-      refreshGoalStatus().catch(function () {});
     }
 
     function copyAllDebugLog() {
@@ -1346,9 +1704,30 @@
       });
     });
     document.getElementById("btn-goal-start").addEventListener("click", startGoalPlan);
-    document.getElementById("btn-goal-new").addEventListener("click", function () {
-      if (goalPlanId && !confirm("Start a new goal plan? Chat for the current plan stays in the database.")) return;
-      clearGoalPlan();
+    document.getElementById("btn-goal-clear-form").addEventListener("click", clearNewGoalForm);
+    document.querySelectorAll(".goal-sub-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        setGoalSubMode(btn.getAttribute("data-goal-sub"));
+      });
+    });
+    document.getElementById("goal-plan-select").addEventListener("change", function () {
+      const v = document.getElementById("goal-plan-select").value;
+      if (!v) return;
+      goalPlanId = v;
+      try {
+        sessionStorage.setItem(goalPlanKey(), goalPlanId);
+      } catch (e) { /* ignore */ }
+      syncModeChrome();
+      loadGoalPlanChat().catch(function (err) {
+        appendChatLog("error", "Could not load plan: " + err, null, logGoalEl);
+      });
+    });
+    document.getElementById("btn-goal-refresh-plans").addEventListener("click", function () {
+      loadGoalPlansList()
+        .then(function () { return loadGoalPlanChat(); })
+        .catch(function (err) {
+          appendChatLog("error", "Refresh failed: " + err, null, logGoalEl);
+        });
     });
 
     document.getElementById("composer").addEventListener("submit", async (e) => {
@@ -1362,11 +1741,22 @@
       const ta = document.getElementById("msg");
       const text = ta.value.trim();
       if (!text) return;
-      if (isGoalMode() && !goalPlanId) {
-        appendChatLog("system", "Click Start plan above before chatting.");
-        return;
+      if (isGoalMode()) {
+        if (!goalPlanId) {
+          appendChatLog(
+            "system",
+            isGoalChatSubMode()
+              ? "Select a plan in the dropdown, or create one under **New goal**."
+              : "Enter a title and click **Start plan** first.",
+            null,
+            logGoalEl
+          );
+          return;
+        }
       }
-      appendChatLog("user", text);
+      if (isGoalMode()) clearGoalWelcomeCard();
+      const logRoot = isGoalMode() ? logGoalEl : null;
+      appendChatLog("user", text, null, logRoot);
       setStatePill("analyzing");
       ta.value = "";
       setBusy(true);
@@ -1375,9 +1765,14 @@
         if (isGoalMode()) {
           j = await fetchJson(apiUrl("/api/goals/plan/message"), {
             method: "POST",
-            body: JSON.stringify({ plan_id: goalPlanId, message: text }),
+            body: JSON.stringify({
+              plan_id: goalPlanId,
+              message: text,
+              ui_mode: isGoalChatSubMode() ? "my_goals" : "new_goal",
+            }),
           });
           appendAssistantResponse(j, text, "goal-plan/message");
+          applyRateLimitCooldown(getApiUsage(j));
         } else {
           j = await fetchJson(apiUrl("/api/chat"), {
             method: "POST",
@@ -1407,7 +1802,8 @@
           body: JSON.stringify({ user_id: userId }),
         });
         const j = await r.json();
-        logEl.innerHTML = "";
+        logCalendarEl.innerHTML = "";
+        logGoalEl.innerHTML = "";
         debugLogEl.innerHTML = "";
         setStatePill("idle");
         appendDebugBlock("reset", { state: "idle", debug: j });
@@ -1545,15 +1941,8 @@
       loadGoalPlanFromStorage();
       syncModeChrome();
       updateUserChrome(authCtx);
-      if (isGoalMode() && goalPlanId) {
-        refreshGoalStatus()
-          .then(function () {
-            return fetchJson(apiUrl("/api/goals/plan/" + encodeURIComponent(goalPlanId)), {}, 15000);
-          })
-          .then(function (st) {
-            renderGoalMessages(st.messages);
-          })
-          .catch(function () { setStatePill("idle"); });
+      if (isGoalMode()) {
+        enterGoalPlannerUi().catch(function () { setStatePill("idle"); });
       } else {
         refreshStatus().catch(function () { setStatePill("idle"); });
       }

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from todai.agent.core.display import build_schedule_display
+from todai.agent.core.goal_overlay import build_schedule_display_with_goals
 from todai.agent.core.intents._shared import run_specialist
 from todai.agent.core.preview_reply import build_free_days_period_reply, build_grounded_preview_reply
 from todai.agent.routing.preview_range import resolve_preview_range
@@ -58,14 +58,17 @@ def handle(ctx: TurnContext) -> IntentResult:
     if not reply:
         reply = "Here's your schedule below."
 
-    display = build_schedule_display(
+    display = build_schedule_display_with_goals(
         ctx.read_results,
+        user_id=ctx.user_id,
         period_from=preview.date_from,
         period_to=preview.date_to,
         fill_empty_days=preview.fill_empty_days,
         title=preview.label,
         show_free_banners=preview.show_free_banners,
     )
+    if display and display.get("days"):
+        ctx.trace.append({"phase": "goal_overlay", "merged": True})
 
     return IntentResult(
         reply_text=reply,

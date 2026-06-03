@@ -1,97 +1,264 @@
-"""Rule-based routing for goal planner turns (no LLM router)."""
+"""Goal planner routing facade — Groq router + rules fallback + phase guards."""
+
+
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
-from typing import Literal
 
-from todai.goal_planner.interrogation import answers_complete
+
+from dataclasses import dataclass
+
+from typing import Any, Literal
+
+
+
+from todai.goal_planner.routing.contracts import GoalRouterModel
+
+from todai.goal_planner.routing.guards import apply_goal_route_guards
+
+from todai.goal_planner.routing.llm_router import route_goal_turn_llm
+
+from todai.goal_planner.routing.rules_router import route_goal_turn_rules
+
+from todai.goal_planner.routing.routing_guards import apply_goal_router_guards
+
+
 
 GoalRoute = Literal[
+
     "goal_interrogate",
+
     "goal_confirm",
+
     "goal_create",
+
+    "goal_manage",
+
     "goal_schedule_read",
-    "goal_goals_list",
-    "goal_delete",
-    "goal_edit",
+
     "goal_chat",
+
+    "goal_goals_list",
+
+    "goal_delete",
+
+    "goal_edit",
+
 ]
 
-_SCHEDULE_PATTERNS = re.compile(
-    r"\b(free time|free slot|calendar|schedule|what.?s on|busy|available|"
-    r"my plan|show tasks|show my|my schedule|view my|give me|can i view|"
-    r"this week|tomorrow|my tasks|daily tasks)\b",
-    re.I,
-)
-_GOALS_LIST_PATTERNS = re.compile(
-    r"\b(review goals?|my goals?|list goals?|show goals?|view goals?|all goals?)\b",
-    re.I,
-)
-_DELETE_PATTERNS = re.compile(
-    r"\b(delete|remove|cancel|clear|drop)\b.*\b(goal|plan|tasks?)\b|"
-    r"\b(goal|plan|tasks?)\b.*\b(delete|remove|cancel|clear)\b",
-    re.I,
-)
-_DELETE_ALL_PATTERNS = re.compile(
-    r"\b(delete|remove|clear)\b.*\b(all|every)\b.*\b(goal|plan)",
-    re.I,
-)
-_EDIT_PATTERNS = re.compile(
-    r"\b(move|reschedule|edit task|skip|swap|easier|harder|mark done|complete task)\b",
-    re.I,
-)
-_CREATE_PATTERNS = re.compile(
-    r"\b(create|generate|build|make)\s+(the\s+)?(plan|tasks|schedule)\b",
-    re.I,
-)
+
+
 
 
 @dataclass(frozen=True)
+
 class GoalRouterOutput:
-    route: GoalRoute
-    reason: str
+
+    route: str
+
+    manage_action: str = "none"
+
+    tools: tuple[dict[str, Any], ...] = ()
+
+    reason: str = ""
+
+    source: str = "rules"
+
+    guard_notes: tuple[dict[str, Any], ...] = ()
+
+
+
 
 
 def route_goal_turn(
+
     *,
+
     message: str,
+
     phase: str,
+
     answers: dict,
+
+    plan_id: str = "",
+
+    session: dict[str, Any] | None = None,
+
+    history: list[dict[str, Any]] | None = None,
+
+    ui_mode: str = "my_goals",
+    needs_task_setup: bool = False,
 ) -> GoalRouterOutput:
-    text = (message or "").strip()
-    complete = answers_complete(answers)
 
-    if phase == "active":
-        if _DELETE_ALL_PATTERNS.search(text) or _DELETE_PATTERNS.search(text):
-            return GoalRouterOutput("goal_delete", "active_delete_keywords")
-        if _GOALS_LIST_PATTERNS.search(text):
-            return GoalRouterOutput("goal_goals_list", "active_goals_list")
-        if _EDIT_PATTERNS.search(text):
-            return GoalRouterOutput("goal_edit", "active_edit_keywords")
-        if _SCHEDULE_PATTERNS.search(text):
-            return GoalRouterOutput("goal_schedule_read", "active_schedule_keywords")
-        return GoalRouterOutput("goal_chat", "active_general")
+    """
 
-    if phase == "confirm":
-        return GoalRouterOutput("goal_confirm", "awaiting_confirmation")
+    Classify one goal-plan turn (same layering as calendar: LLM → guards → handlers).
 
-    if complete and (_CREATE_PATTERNS.search(text) or phase == "ready"):
-        return GoalRouterOutput("goal_create", "answers_complete_create")
 
-    if phase in ("interrogate", "intake", "clarify", ""):
-        if complete and re.search(r"\b(yes|create|generate)\b", text, re.I):
-            return GoalRouterOutput("goal_create", "interrogate_done_yes")
-        if _SCHEDULE_PATTERNS.search(text) and not complete:
-            return GoalRouterOutput("goal_schedule_read", "mid_intake_schedule")
-        if _DELETE_PATTERNS.search(text):
-            return GoalRouterOutput("goal_delete", "mid_intake_delete")
-        if _EDIT_PATTERNS.search(text):
-            return GoalRouterOutput("goal_edit", "mid_intake_edit")
-        return GoalRouterOutput("goal_interrogate", "collecting_answers")
 
-    if phase == "creating":
-        return GoalRouterOutput("goal_chat", "already_creating")
+    Falls back to regex rules if Groq is off or returns invalid JSON.
 
-    return GoalRouterOutput("goal_interrogate", "default")
+    """
+
+    session = session or {}
+
+    from todai.goal_planner.routing.context import groq_goal_router_context
+
+
+
+    pending = session.get("pending_manage")
+
+    if pending:
+
+        kind = str(pending.get("kind") or "")
+
+        action = {
+
+            "delete_all": "delete_all",
+
+            "delete_plan": "delete_plan",
+
+            "delete_goal": "delete_goal",
+
+        }.get(kind, "none")
+
+        tool_name = {
+            "delete_all": "delete_all_goals",
+            "delete_plan": "delete_plan",
+            "delete_goal": "delete_goal",
+        }.get(kind)
+        tools = ({"tool": tool_name, "arguments": {}},) if tool_name else ()
+
+        return GoalRouterOutput(
+
+            route="goal_manage",
+
+            manage_action=action,
+
+            tools=tools,
+
+            reason="pending_manage",
+
+            source="session",
+
+        )
+
+
+
+    routing_context = groq_goal_router_context(history or [], message, session=session)
+
+
+
+    model, errs, dbg = route_goal_turn_llm(
+
+        current_message=message,
+
+        routing_context=routing_context or None,
+
+        phase=phase,
+
+        answers=answers,
+
+        plan_id=plan_id,
+
+        session=session,
+
+        ui_mode=ui_mode,
+        needs_task_setup=needs_task_setup,
+    )
+
+    source = "groq"
+
+    if model is None:
+        from todai.goal_planner.routing.rules_router import match_setup_intent
+
+        if needs_task_setup:
+            model = match_setup_intent(message, answers)
+        if model is None:
+            model = route_goal_turn_rules(message=message, phase=phase, answers=answers)
+        source = "rules_fallback"
+
+        if errs:
+
+            reason = f"invalid_router|{'|'.join(e.get('code', '') for e in errs)}"
+
+        else:
+
+            reason = "rules_fallback"
+
+    else:
+
+        reason = "groq"
+
+
+
+    model, guard_notes = apply_goal_router_guards(
+        model,
+        message=message,
+        ui_mode=ui_mode,
+        session=session,
+        needs_task_setup=needs_task_setup,
+    )
+
+
+
+    model, phase_guard_reason = apply_goal_route_guards(
+
+        model, phase=phase, answers=answers, ui_mode=ui_mode
+
+    )
+
+    if phase_guard_reason != "ok":
+
+        reason = f"{reason}|{phase_guard_reason}"
+
+
+
+    if dbg and dbg.get("mock"):
+
+        source = "rules_mock"
+
+
+
+    raw_route = model.route
+
+    manage_action = model.manage_action
+
+    if raw_route in ("goal_goals_list", "goal_delete", "goal_edit"):
+
+        if manage_action == "none":
+
+            manage_action = {
+
+                "goal_goals_list": "list",
+
+                "goal_delete": "delete_goal",
+
+                "goal_edit": "edit",
+
+            }[raw_route]
+
+        route = "goal_manage"
+
+    else:
+
+        route = raw_route
+
+
+
+    return GoalRouterOutput(
+
+        route=route,
+
+        manage_action=manage_action,
+
+        tools=tuple(model.tools),
+
+        reason=reason,
+
+        source=source,
+
+        guard_notes=tuple(guard_notes),
+
+    )
+

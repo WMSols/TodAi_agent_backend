@@ -207,9 +207,12 @@ def format_plan_schedule_reply(
             f"({prog.get('percent', 0)}%) · {prog.get('pending', 0)} pending\n\n"
         )
     sections: list[str] = [header] if header else []
-    task_text = format_goal_tasks(tasks)
-    if task_text:
-        sections.append(task_text)
+    if schedule_display and (schedule_display.get("days") or []):
+        sections.append("Your tasks are in the **calendar panel** below.")
+    else:
+        task_text = format_goal_tasks(tasks)
+        if task_text:
+            sections.append(task_text)
 
     cal_lines = format_schedule_read_results(tool_results)
     if cal_lines:

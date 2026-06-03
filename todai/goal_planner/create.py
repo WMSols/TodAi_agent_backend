@@ -63,7 +63,7 @@ def build_tasks_from_free_time(
             gap_mins = int((ge - gs).total_seconds() // 60)
             if gap_mins < per_task:
                 continue
-            if _is_overnight_noise(gs, ge, per_task):
+            if _is_overnight_noise(gs, ge, per_task) or gs.hour < 6:
                 continue
             task_end = gs + timedelta(minutes=per_task)
             placed += 1

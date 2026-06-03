@@ -91,11 +91,12 @@ class GoalPlanSessionStore:
             "intake_step": "objective",
             "answers": {},
             "goal_id": goal_id,
-            "title": title,
-            "description": description,
+            "title": title.strip(),
+            "description": description.strip(),
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
         }
+        session["intake_style"] = "ai"
         self._save_plan_session(plan_id, session)
         return {
             "plan_id": plan_id,
@@ -277,6 +278,25 @@ class GoalPlanSessionStore:
         )
         return list(rows.data or [])
 
+    def list_goal_tasks_in_range(self, start: date, end: date) -> list[dict[str, Any]]:
+        """All goal tasks for this user between start and end (inclusive)."""
+        if not self._client:
+            return []
+        rows = (
+            self._client.table("goal_tasks")
+            .select(
+                "id, title, description, task_date, start_time, end_time, status, "
+                "sort_order, plan_id, goal_id"
+            )
+            .eq("user_id", self.db_user_id)
+            .gte("task_date", start.isoformat())
+            .lte("task_date", end.isoformat())
+            .order("task_date")
+            .order("sort_order")
+            .execute()
+        )
+        return list(rows.data or [])
+
     def list_user_goals(self) -> list[dict[str, Any]]:
         if not self._client:
             return []
@@ -300,6 +320,82 @@ class GoalPlanSessionStore:
             .execute()
         )
         return list(rows.data or [])
+
+    def delete_goal_for_plan(self, plan_id: str) -> dict[str, Any]:
+        """Remove goal + all its week plans, tasks, chat, and session memory (not other goals)."""
+        if not self._client:
+            return {"ok": False, "plan_id": plan_id}
+        plan_row = self.get_plan_row(plan_id)
+        if not plan_row:
+            return {"ok": False, "plan_id": plan_id, "error": "plan_not_found"}
+        goal_id = str(plan_row["goal_id"])
+
+        plans = (
+            self._client.table("goal_week_plans")
+            .select("id")
+            .eq("goal_id", goal_id)
+            .eq("user_id", self.db_user_id)
+            .execute()
+        )
+        plan_ids = [str(p["id"]) for p in (plans.data or [])]
+
+        tasks = (
+            self._client.table("goal_tasks")
+            .delete()
+            .eq("goal_id", goal_id)
+            .eq("user_id", self.db_user_id)
+            .execute()
+        )
+        task_count = len(tasks.data or [])
+
+        for pid in plan_ids:
+            conv = (
+                self._client.table("conversations")
+                .select("id")
+                .eq("goal_week_plan_id", pid)
+                .execute()
+            )
+            for row in conv.data or []:
+                cid = str(row["id"])
+                self._client.table("message_buckets").delete().eq(
+                    "conversation_id", cid
+                ).execute()
+                self._client.table("conversations").delete().eq("id", cid).execute()
+            key = _plan_session_key(pid)
+            mem = (
+                self._client.table("agent_memories")
+                .select("id")
+                .eq("user_id", self.db_user_id)
+                .like("content", f"{key}%")
+                .execute()
+            )
+            for mrow in mem.data or []:
+                self._client.table("agent_memories").delete().eq(
+                    "id", mrow["id"]
+                ).execute()
+
+        plans_del = (
+            self._client.table("goal_week_plans")
+            .delete()
+            .eq("goal_id", goal_id)
+            .eq("user_id", self.db_user_id)
+            .execute()
+        )
+        goal_del = (
+            self._client.table("goals")
+            .delete()
+            .eq("id", goal_id)
+            .eq("user_id", self.db_user_id)
+            .execute()
+        )
+        return {
+            "ok": True,
+            "goal_id": goal_id,
+            "plan_id": plan_id,
+            "tasks_deleted": task_count,
+            "plans_deleted": len(plans_del.data or []),
+            "goals_deleted": len(goal_del.data or []),
+        }
 
     def delete_plan(self, plan_id: str) -> dict[str, Any]:
         if not self._client:

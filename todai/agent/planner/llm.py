@@ -106,6 +106,7 @@ ROUTER_SYSTEM = (
     + ROUTER_JSON_CONTRACT
     + ROUTER_TIME_SCOPE_RULES
     + "chat: tools [], time_scope default. preview: read calendar. write: add/move/time. delete: remove.\n"
+    "Goals (create/delete/7-day plans/list goals): user uses Goal planner tab, not calendar.\n"
     "Do not use next_week for next <weekday> alone. Output JSON only.\n"
 )
 

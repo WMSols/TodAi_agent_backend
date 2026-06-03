@@ -35,7 +35,7 @@ def handle(ctx: TurnContext) -> IntentResult:
 
     display = None
     if months and not apply_errors:
-        display = build_week_schedule_display(ctx.store, ctx.full_index)
+        display = build_week_schedule_display(ctx.store, ctx.full_index, user_id=ctx.user_id)
 
     return IntentResult(
         reply_text=reply,

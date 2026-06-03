@@ -11,7 +11,12 @@ from pydantic import BaseModel, Field
 from todai.api.auth import require_user_with_fallback
 from todai.api.logging import log_api_response, logger
 from todai.database.config import use_local_storage
-from todai.goal_planner.service import get_goal_plan_state, process_goal_plan_message, start_goal_plan
+from todai.goal_planner.service import (
+    get_goal_plan_state,
+    list_goal_plans,
+    process_goal_plan_message,
+    start_goal_plan,
+)
 
 router = APIRouter(prefix="/api/goals/plan", tags=["goal-plan"])
 
@@ -24,6 +29,10 @@ class GoalPlanStartRequest(BaseModel):
 class GoalPlanMessageRequest(BaseModel):
     plan_id: str = Field(..., min_length=1)
     message: str = Field(..., min_length=1, max_length=4000)
+    ui_mode: str = Field(
+        "my_goals",
+        description="my_goals = conversational; new_goal = static 4-question intake only",
+    )
 
 
 def _user_id(authorization: str | None = Header(None, alias="Authorization")) -> str:
@@ -67,11 +76,13 @@ async def api_goal_plan_message(
     if use_local_storage():
         raise HTTPException(status_code=400, detail="Goal planner requires Supabase (LOCAL=false).")
     try:
+        ui_mode = body.ui_mode if body.ui_mode in ("my_goals", "new_goal") else "my_goals"
         resp = await asyncio.to_thread(
             process_goal_plan_message,
             user_id,
             body.plan_id,
             body.message,
+            ui_mode=ui_mode,
         )
         log_api_response(
             "goal-plan/message",
@@ -85,11 +96,26 @@ async def api_goal_plan_message(
         raise
 
 
-@router.get("/{plan_id}")
-async def api_goal_plan_get(
-    plan_id: str,
+@router.get("/plans")
+async def api_goal_plans_list(
     user_id: str = Depends(_user_id),
 ) -> dict[str, Any]:
     if use_local_storage():
         raise HTTPException(status_code=400, detail="Goal planner requires Supabase (LOCAL=false).")
-    return await asyncio.to_thread(get_goal_plan_state, user_id, plan_id)
+    return await asyncio.to_thread(list_goal_plans, user_id)
+
+
+@router.get("/{plan_id}")
+async def api_goal_plan_get(
+    plan_id: str,
+    include_messages: bool = True,
+    user_id: str = Depends(_user_id),
+) -> dict[str, Any]:
+    if use_local_storage():
+        raise HTTPException(status_code=400, detail="Goal planner requires Supabase (LOCAL=false).")
+    return await asyncio.to_thread(
+        get_goal_plan_state,
+        user_id,
+        plan_id,
+        include_messages=include_messages,
+    )

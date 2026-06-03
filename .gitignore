@@ -35,3 +35,6 @@ docs/goals-tasks-schema.drawio
 docs/supabase/README.md
 todai/README.md
 docs/mvp-database-schema.md
+tests/
+tests/test_goal_interrogation.py
+tests/test_goal_interrogation.py

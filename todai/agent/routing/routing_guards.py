@@ -13,6 +13,7 @@ import re
 from typing import Any
 
 from todai.agent.planner.llm import AgentRoute, RouterOutput
+from todai.agent.routing.goal_redirect import should_redirect_to_goal_planner
 from todai.agent.routing.time_scope import strip_router_tool_dates
 
 _WRITE_VERBS = re.compile(r"\b(add|book|create|reschedule)\b", re.I)
@@ -191,6 +192,17 @@ def apply_route_guards(
     notes: list[dict[str, Any]] = []
     tools = strip_router_tool_dates(normalize_router_tool_calls(router_out.tools))
     route = router_out.agent_route
+
+    if should_redirect_to_goal_planner(message):
+        notes.append(
+            {
+                "phase": "route_guard",
+                "forced": "chat",
+                "reason": "goal_planner_redirect",
+                "was": route.value,
+            }
+        )
+        return AgentRoute.CHAT, [], notes
 
     if is_plain_chat_message(message):
         if route != AgentRoute.CHAT:
