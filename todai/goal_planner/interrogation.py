@@ -284,9 +284,11 @@ def _answer_label(answers: dict[str, Any], step: str) -> str:
     return str(parsed)
 
 
-def confirmation_prompt(answers: dict[str, Any]) -> str:
+def confirmation_prompt(answers: dict[str, Any], *, goal_title: str = "") -> str:
+    title_line = f"**Goal:** {goal_title.strip()}\n" if (goal_title or "").strip() else ""
     return (
         "**Review your 7-day plan settings**\n"
+        f"{title_line}"
         f"1. Objective: {_answer_label(answers, 'objective')}\n"
         f"2. Difficulty: {_answer_label(answers, 'difficulty')}\n"
         f"3. Tasks per day: {_answer_label(answers, 'tasks_per_day')}\n"

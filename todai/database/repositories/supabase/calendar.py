@@ -43,6 +43,7 @@ class SupabaseCalendarRepository:
         return {
             "id": str(row["id"]),
             "title": row.get("title") or "Block",
+            "description": row.get("description") or "",
             "start": utc_to_local_naive_str(parse_ts(row["start_at"]), tz),
             "end": utc_to_local_naive_str(parse_ts(row["end_at"]), tz),
             "kind": row.get("kind") or "focus",
@@ -58,7 +59,7 @@ class SupabaseCalendarRepository:
         )
         rows = (
             self._ctx.client.table("calendar_events")
-            .select("id, title, start_at, end_at, kind, status, deleted_at")
+            .select("id, title, description, start_at, end_at, kind, status, deleted_at")
             .eq("user_id", self._ctx.db_user_id)
             .is_("deleted_at", "null")
             .eq("status", "confirmed")
@@ -103,6 +104,7 @@ class SupabaseCalendarRepository:
                     "id": bid,
                     "user_id": self._ctx.db_user_id,
                     "title": blk.get("title") or "Block",
+                    "description": blk.get("description") or None,
                     "start_at": local_naive_to_utc(str(blk["start"]), tz).isoformat(),
                     "end_at": local_naive_to_utc(str(blk["end"]), tz).isoformat(),
                     "kind": blk.get("kind") or "focus",

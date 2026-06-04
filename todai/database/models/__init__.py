@@ -3,9 +3,8 @@
 from todai.database.models.api import (
     ChatRequest,
     ChatResponse,
-    ConfirmRequest,
+    LoginRequest,
     RegisterRequest,
-    RejectRequest,
     ResetRequest,
 )
 from todai.database.models.paths import UserPaths
@@ -13,9 +12,8 @@ from todai.database.models.paths import UserPaths
 __all__ = [
     "ChatRequest",
     "ChatResponse",
-    "ConfirmRequest",
+    "LoginRequest",
     "RegisterRequest",
-    "RejectRequest",
     "ResetRequest",
     "UserPaths",
 ]

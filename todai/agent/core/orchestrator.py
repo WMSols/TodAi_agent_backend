@@ -1,5 +1,5 @@
 """
-main.py — orchestrate one user message
+orchestrator.py — one calendar chat turn
 
 Flow:
   1. Append user message, set FSM to analyzing
@@ -14,18 +14,17 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from todai.agent.planner.llm import AgentRoute
+from todai.agent.planner.llm import AgentRoute, run_router
 from todai.agent.core.context import (
     assistant_meta,
     groq_history_from_chat,
     merged_write_context_message,
     groq_specialist_history,
 )
-from todai.agent.routing.time_scope import normalize_time_scope, resolve_preview_range_for_turn
+from todai.agent.routing.preview_range import normalize_time_scope, resolve_preview_range_for_turn
 from todai.agent.routing.date_anchor import build_date_anchor
 from todai.agent.core.intents import dispatch
 from todai.agent.core.prefetch import resolve_and_prefetch
-from todai.agent.routing.router import run_router
 from todai.agent.routing.routing_guards import apply_route_guards
 from todai.agent.core.types import (
     AgentMode,
@@ -160,7 +159,7 @@ def orchestrate_turn(store: UserStore, *, user_id: str, message: str) -> ChatRes
     if preview_range and route != AgentRoute.CHAT:
         trace.append({"phase": "time_scope", **preview_range.as_dict()})
     if route == AgentRoute.SCHEDULE_PREVIEW:
-        from todai.agent.routing.preview_read_kind import classify_preview_read
+        from todai.agent.routing.preview_range import classify_preview_read
 
         trace.append({"phase": "preview_read_kind", "kind": classify_preview_read(message).value})
 

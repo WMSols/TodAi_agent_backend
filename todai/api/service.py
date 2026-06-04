@@ -1,10 +1,8 @@
 """
 service.py — business entrypoints used by the HTTP API
 
-  process_chat  — orchestrator.orchestrate_turn
-  confirm       — stub (changes apply on chat; kept for UI compatibility)
-  reject        — stub
-  get_debug_state — expose chat FSM + storage index for /api/state
+  process_chat      — orchestrator.orchestrate_turn
+  get_debug_state   — expose chat FSM + storage snapshot for /api/state
 """
 
 from __future__ import annotations
@@ -16,8 +14,6 @@ from todai.api.middleware.rate_limit import groq_limits, groq_tracker
 from todai.database import user_store
 from todai.database.config import storage_backend_label
 from todai.agent.planner.groq_config import planner_mode
-from todai.database.config import use_local_storage
-from todai.database.models import ChatResponse
 
 
 def bootstrap_user_profile(
@@ -50,43 +46,13 @@ def bootstrap_user_profile(
         "user_id": user_id,
         "display_name": name,
         "email": email,
-        "storage": "local" if use_local_storage() else "supabase",
+        "storage": storage_backend_label(),
     }
 
 
-def process_chat(user_id: str, message: str) -> ChatResponse:
+def process_chat(user_id: str, message: str):
     with user_store(user_id) as store:
         return orchestrate_turn(store, user_id=user_id, message=message)
-
-
-def confirm(user_id: str) -> ChatResponse:
-    with user_store(user_id) as store:
-        chat = store.read_chat()
-        msg = "There's nothing waiting to confirm — changes apply when you ask."
-        return ChatResponse(
-            assistant_text=msg,
-            reply_text=msg,
-            state=str(chat.get("state", "idle")),
-            schedule_version=int(chat.get("schedule_version", 1)),
-            agent_mode=chat.get("last_agent_mode") or "chat",
-            agent_state=chat.get("last_agent_mode") or "chat",
-            debug={"confirm_stub": True},
-        )
-
-
-def reject(user_id: str) -> ChatResponse:
-    with user_store(user_id) as store:
-        chat = store.read_chat()
-        msg = "There's nothing to cancel right now."
-        return ChatResponse(
-            assistant_text=msg,
-            reply_text=msg,
-            state=str(chat.get("state", "idle")),
-            schedule_version=int(chat.get("schedule_version", 1)),
-            agent_mode=chat.get("last_agent_mode") or "chat",
-            agent_state=chat.get("last_agent_mode") or "chat",
-            debug={"reject_stub": True},
-        )
 
 
 def get_debug_state(user_id: str, light: bool = True) -> dict[str, Any]:

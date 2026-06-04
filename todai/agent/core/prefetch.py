@@ -1,5 +1,5 @@
 """
-prefetch.py — validate router tool plan and execute read tools before intent handlers
+prefetch.py — validate router tool plan, align preview reads, execute tools before intents.
 """
 
 from __future__ import annotations
@@ -7,26 +7,59 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from todai.agent.core.prefetch_tools import augment_preview_tool_calls
-from todai.agent.routing.weekday_pick import pick_nearest_weekday_option
 from todai.agent.tools.calendar import run_prefetch, validate_tool_plan
 from todai.agent.planner.llm import AgentRoute, default_tools_for_route
 from todai.agent.routing.preview_range import (
     PreviewRange,
+    PreviewReadKind,
     apply_preview_range_to_tools,
+    classify_preview_read,
     clamp_preview_range,
     message_has_month_phrase,
-)
-from todai.agent.routing.date_anchor import single_day_iso_from_anchor
-from todai.agent.routing.time_scope import (
     message_implies_multi_weekday_scope,
     message_implies_single_day,
+    pick_nearest_weekday_option,
     refine_scope_for_message,
     resolve_preview_range_for_turn,
     scope_from_weekday_candidates,
     strip_router_tool_dates,
 )
+from todai.agent.routing.date_anchor import single_day_iso_from_anchor
 from todai.database.storage import UserStore, parse_server_date
+
+_SPECIALTY_TOOLS = frozenset({"get_free_time", "get_days_without_schedule"})
+
+
+def augment_preview_tool_calls(
+    tool_calls: list[dict[str, Any]],
+    *,
+    message: str,
+    scope: PreviewRange,
+) -> list[dict[str, Any]]:
+    """Ensure the right read tool(s) for free-day vs free-time vs normal schedule preview."""
+    kind = classify_preview_read(message)
+    want = {"from": scope.date_from, "to": scope.date_to}
+    calls = apply_preview_range_to_tools(tool_calls, scope)
+
+    def _drop(tools: frozenset[str]) -> list[dict[str, Any]]:
+        return [c for c in calls if c.get("tool") not in tools]
+
+    def _with_required(required: list[str]) -> list[dict[str, Any]]:
+        out = list(calls)
+        present = {str(c.get("tool")) for c in out}
+        for tool in required:
+            if tool not in present:
+                out.append({"tool": tool, "arguments": dict(want)})
+        return apply_preview_range_to_tools(out, scope)
+
+    if kind == PreviewReadKind.FREE_DAYS:
+        calls = _drop(frozenset({"get_free_time"}))
+        return _with_required(["get_days_without_schedule", "get_schedule_range"])
+    if kind == PreviewReadKind.FREE_TIME:
+        calls = _drop(frozenset({"get_days_without_schedule"}))
+        return _with_required(["get_free_time", "get_schedule_range"])
+    calls = _drop(_SPECIALTY_TOOLS)
+    return _with_required(["get_schedule_range"])
 
 
 def _single_day_range(iso: str) -> PreviewRange | None:

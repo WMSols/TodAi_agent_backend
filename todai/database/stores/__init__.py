@@ -1,11 +1,11 @@
-"""Persistence backends: local JSON and Supabase."""
+"""Persistence — Supabase per-user store."""
 
-from todai.database.stores.factory import StoreT, log_storage_mode, user_store
-from todai.database.stores.json_store import JsonUserStore, UserStore
+from todai.database.stores.factory import StoreT, UserStore, log_storage_mode, user_store
 from todai.database.stores.reset import reset_user_to_seed
+from todai.database.stores.supabase_store import SupabaseUserStore
 
 __all__ = [
-    "JsonUserStore",
+    "SupabaseUserStore",
     "UserStore",
     "StoreT",
     "user_store",

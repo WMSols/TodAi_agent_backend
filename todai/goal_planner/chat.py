@@ -9,8 +9,8 @@ from typing import Any
 from todai.agent.planner.groq_config import GROQ_API_KEY
 from todai.agent.planner.llm import groq_chat_json
 from todai.goal_planner.interrogation import is_active_acknowledgment
-from todai.goal_planner.plan_state import plan_needs_task_setup
-from todai.goal_planner.routing.context import groq_goal_chat_context
+from todai.goal_planner.plan_resolver import plan_needs_task_setup
+from todai.goal_planner.routing import groq_goal_chat_context
 from todai.goal_planner.session_store import GoalPlanSessionStore
 
 logger = logging.getLogger(__name__)

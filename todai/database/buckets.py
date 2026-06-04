@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -81,3 +82,37 @@ def messages_for_llm(
             text = text[:max_chars] + "\n…(truncated)"
         rows.append({"role": str(m["role"]), "content": text})
     return rows
+
+
+def ensure_bucket_structure(
+    data: dict[str, Any],
+    *,
+    channel: MessageChannel = "chat",
+) -> dict[str, Any]:
+    buckets = data.get("buckets")
+    if not isinstance(buckets, list) or not buckets:
+        bid = str(uuid.uuid4())
+        data["buckets"] = [{"id": bid, "channel": channel, "messages": data.get("messages") or []}]
+        data["active_bucket_id"] = bid
+    if not data.get("active_bucket_id"):
+        data["active_bucket_id"] = data["buckets"][0]["id"]
+    return data
+
+
+def replace_bucket_messages(
+    data: dict[str, Any],
+    messages: list[dict[str, Any]],
+    *,
+    limits: BucketLimits,
+    channel: MessageChannel = "chat",
+) -> None:
+    data = ensure_bucket_structure(data, channel=channel)
+    trimmed = limits.trimmed(
+        [r for m in messages if (r := normalize_message_row(m)) is not None]
+    )
+    bid = data["active_bucket_id"]
+    for b in data.get("buckets") or []:
+        if isinstance(b, dict) and b.get("id") == bid:
+            b["messages"] = trimmed
+            break
+    data["messages"] = trimmed

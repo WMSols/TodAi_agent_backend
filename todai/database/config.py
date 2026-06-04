@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -12,10 +13,14 @@ load_dotenv(REPO_ROOT / ".env")
 
 __all__ = [
     "REPO_ROOT",
-    "DATA_DIR",
     "DEFAULT_SANDBOX_USER_ID",
     "SESSION_MEMORY_PREFIX",
-    "use_local_storage",
+    "auth_dev_allow_default",
+    "firebase_configured",
+    "firebase_project_id",
+    "firebase_service_account_info",
+    "local_auth_secret",
+    "local_auth_configured",
     "storage_backend_label",
     "supabase_configured",
     "supabase_url",
@@ -24,35 +29,10 @@ __all__ = [
     "seed_dir",
 ]
 
-DATA_DIR = Path(os.environ.get("TODAI_DATA_DIR", str(REPO_ROOT / "data")))
-
-# Sandbox user id in API → fixed UUID in Postgres when not using local JSON.
+# Sandbox user id in API → fixed UUID in Postgres when not authenticated.
 DEFAULT_SANDBOX_USER_ID = "00000000-0000-0000-0000-000000000001"
 
 SESSION_MEMORY_PREFIX = "TODAI_SESSION::"
-
-
-def _env_bool(name: str) -> bool | None:
-    raw = os.environ.get(name, "").strip().lower()
-    if not raw:
-        return None
-    if raw in ("0", "false", "no", "off"):
-        return False
-    if raw in ("1", "true", "yes", "on"):
-        return True
-    return None
-
-
-def use_local_storage() -> bool:
-    """True → JSON under data/users/; False → Supabase (requires SUPABASE_* env).
-
-    Defaults to True (local JSON) when LOCAL is unset so existing dev setups keep working.
-    """
-    for key in ("LOCAL", "TODAI_LOCAL"):
-        val = _env_bool(key)
-        if val is not None:
-            return val
-    return True
 
 
 def supabase_configured() -> bool:
@@ -71,9 +51,65 @@ def supabase_service_role_key() -> str:
     return os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 
 
+def firebase_project_id() -> str:
+    return os.environ.get("FIREBASE_PROJECT_ID", "").strip()
+
+
+def firebase_service_account_info() -> dict | None:
+    """Parse service account JSON from env or file path."""
+    raw = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+    if raw:
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else None
+        except json.JSONDecodeError:
+            path = Path(raw)
+            if path.is_file():
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    return data if isinstance(data, dict) else None
+                except (OSError, json.JSONDecodeError):
+                    return None
+            return None
+    path_raw = os.environ.get("FIREBASE_SERVICE_ACCOUNT_PATH", "").strip()
+    if not path_raw:
+        path_raw = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+    if path_raw:
+        path = Path(path_raw)
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                return data if isinstance(data, dict) else None
+            except (OSError, json.JSONDecodeError):
+                return None
+    return None
+
+
+def firebase_configured() -> bool:
+    return bool(firebase_project_id() and firebase_service_account_info())
+
+
+def auth_dev_allow_default() -> bool:
+    """When True, missing Authorization uses sandbox user even if auth is configured."""
+    return os.environ.get("AUTH_DEV_ALLOW_DEFAULT", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def local_auth_secret() -> str:
+    return os.environ.get("LOCAL_AUTH_SECRET", "").strip()
+
+
+def local_auth_configured() -> bool:
+    return bool(local_auth_secret()) and supabase_configured()
+
+
 def storage_backend_label() -> str:
-    return "local" if use_local_storage() else "supabase"
+    return "supabase"
 
 
 def seed_dir() -> Path:
+    """Default calendar/profile JSON used only to seed new Supabase users."""
     return Path(__file__).resolve().parent / "seed" / "default"

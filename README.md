@@ -1,6 +1,6 @@
 # TodAI Backend
 
-Python **FastAPI** backend — API layer, AI agent, and file-backed storage.
+Python **FastAPI** backend — API layer, AI agent, and **Supabase** persistence.
 
 ## Repository layout
 
@@ -8,10 +8,10 @@ Python **FastAPI** backend — API layer, AI agent, and file-backed storage.
 todai/
 ├── api/                    # HTTP, static UI, logging, middleware
 ├── agent/                  # Orchestrator, planner (Groq), routing, tools
-└── database/               # models, repositories, stores, utils, seed
+├── calendar_api/           # REST calendar CRUD
+├── goal_planner/           # Goal plans, tasks, AI intake
+└── database/               # models, repositories, stores, seed (for new users)
 ```
-
-See [todai/README.md](todai/README.md) for the full package map.
 
 ## Setup
 
@@ -22,31 +22,32 @@ py -3 -m venv .venv
 pip install -r requirements.txt
 ```
 
-Copy `.env.example` to `.env` and set `GROQ_API_KEY` for live LLM routing (optional — mock mode works without it).
+Copy `.env` and set:
+
+- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (database — required)
+- `LOCAL_AUTH_SECRET` (long random string — signs web login JWTs)
+- `FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON` (Flutter login)
+- `AUTH_DEV_ALLOW_DEFAULT=true` (optional — skip login for local web testing)
+- `GROQ_API_KEY` (optional — mock routing works without it)
+
+Run Supabase migrations under `docs/supabase/` including `003_local_auth.sql`.
+
+Run Supabase migrations under `docs/supabase/` (message buckets, calendar events, goals).
 
 ## Run
 
-From the **repo root** (`F:\TodAi`), not from inside `todai\api`:
+From the **repo root**:
 
 ```powershell
-cd F:\TodAi
-.\.venv\Scripts\Activate.ps1
 python main.py
-```
-
-Other ways that also work:
-
-```powershell
-python -m todai.api.main
-python todai\api\main.py
 ```
 
 | URL | Description |
 |-----|-------------|
-| **http://127.0.0.1:8000/** | Chat UI + `/api/*` |
-| **http://127.0.0.1:8000/health** | Liveness + planner mode |
-
-Legacy `todai_sandbox/` (unchanged on disk): `$env:TODAI_USE_SANDBOX = "1"; py -3 main.py`
+| **http://127.0.0.1:8000/** | Web chat UI |
+| **http://127.0.0.1:8000/docs** | Swagger API docs (Flutter integration guide) |
+| **http://127.0.0.1:8000/redoc** | ReDoc API reference |
+| **http://127.0.0.1:8000/health** | Liveness + auth flags |
 
 ## Tests
 
@@ -58,6 +59,5 @@ py -3 -m pytest tests/ -q
 
 | Pushed | Ignored (local only) |
 |--------|----------------------|
-| `todai/` package | `todai_sandbox/` (legacy) |
-| `main.py`, `requirements.txt`, `tests/`, `README.md` | `data/`, `.env`, `.venv/` |
-| `.gitignore`, `.env.example` | Root `static/` (use `todai/api/static/`) |
+| `todai/` package | `.env`, `.venv/` |
+| `main.py`, `requirements.txt`, `tests/`, `README.md` | Root `static/` (use `todai/api/static/`) |

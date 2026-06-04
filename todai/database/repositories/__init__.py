@@ -1,8 +1,4 @@
-"""
-Domain repositories — profile, chat, calendar.
-
-`stores/` composes these into a per-user unit (with locking for JSON).
-"""
+"""Domain repositories — profile, chat, calendar (Supabase)."""
 
 from todai.database.repositories.composite import CompositeUserRepository
 from todai.database.repositories.protocols import (

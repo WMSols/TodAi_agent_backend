@@ -6,7 +6,7 @@ Prefer explicit imports:
   todai.agent.planner.groq_config — GROQ_* / planner_mode
   todai.database.models      — API + entity shapes
   todai.database.stores      — UserStore, user_store(), reset
-  todai.database.config      — LOCAL / Supabase env
+  todai.database.config      — Supabase env
   todai.database.utils       — dates, json_io
 """
 
@@ -20,22 +20,14 @@ from todai.agent.planner.groq_config import (
     planner_mode,
 )
 from todai.api.logging import log_api_response, logger, setup_logging
-from todai.database.config import (
-    DATA_DIR,
-    REPO_ROOT,
-    seed_dir,
-    storage_backend_label,
-    use_local_storage,
-)
+from todai.database.config import REPO_ROOT, seed_dir, storage_backend_label, supabase_configured
 from todai.database.models import (
     ChatRequest,
     ChatResponse,
-    ConfirmRequest,
-    RejectRequest,
     ResetRequest,
     UserPaths,
 )
-from todai.database.stores import JsonUserStore, UserStore, log_storage_mode, user_store
+from todai.database.stores import SupabaseUserStore, UserStore, log_storage_mode, user_store
 from todai.database.stores.reset import reset_user_to_seed
 from todai.database.utils import (
     atomic_write_json,
@@ -47,7 +39,6 @@ from todai.database.utils import (
 )
 
 __all__ = [
-    "DATA_DIR",
     "REPO_ROOT",
     "GROQ_API_KEY",
     "GROQ_MODEL",
@@ -55,12 +46,10 @@ __all__ = [
     "GROQ_CONTEXT_WINDOW_TOKENS",
     "ChatRequest",
     "ChatResponse",
-    "ConfirmRequest",
-    "RejectRequest",
     "ResetRequest",
     "UserPaths",
     "UserStore",
-    "JsonUserStore",
+    "SupabaseUserStore",
     "user_store",
     "log_storage_mode",
     "atomic_write_json",
@@ -75,6 +64,6 @@ __all__ = [
     "log_api_response",
     "reset_user_to_seed",
     "seed_dir",
-    "use_local_storage",
     "storage_backend_label",
+    "supabase_configured",
 ]

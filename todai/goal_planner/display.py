@@ -5,8 +5,12 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from todai.agent.core.display import _empty_day_row, build_schedule_display
-from todai.agent.core.schedule_format import format_block_line, format_schedule_read_results
+from todai.agent.core.schedule_display import (
+    _empty_day_row,
+    build_schedule_display,
+    format_block_line,
+    format_schedule_read_results,
+)
 
 
 def _fmt_time(t: str | None) -> str:

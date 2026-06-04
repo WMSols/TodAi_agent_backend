@@ -19,6 +19,7 @@ def execute_list_goals_with_progress(
     current_plan_id: str | None = None,
 ) -> dict[str, Any]:
     goals = store.list_user_goals()
+    goals_by_id = {str(g.get("id", "")): g for g in goals}
     plans = []
     for p in store.list_user_plans():
         pid = str(p.get("id", ""))
@@ -28,9 +29,12 @@ def execute_list_goals_with_progress(
         total = len(tasks)
         pending = total - done - skipped
         percent = int((done / total) * 100) if total else 0
+        gid = str(p.get("goal_id") or "")
+        g = goals_by_id.get(gid) or {}
         plans.append(
             {
                 **p,
+                "goal_title": (g.get("title") or "Goal").strip(),
                 "is_current": pid == current_plan_id,
                 "progress": {
                     "total": total,

@@ -10,10 +10,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from todai.agent.core.clarify import reply_is_clarifying
-from todai.agent.core.intents._shared import run_specialist
-from todai.agent.core.operation_guard import apply_with_guard
-from todai.agent.core.refresh_display import build_week_schedule_display
+from todai.agent.core.intents._shared import specialist_with_calendar_apply
+from todai.agent.core.operation_guard import reply_is_clarifying
+from todai.agent.core.schedule_display import build_week_schedule_display
 from todai.agent.core.types import IntentResult, TurnContext
 
 _CLAIMS_SAVED = re.compile(
@@ -33,20 +32,9 @@ def _write_failed_reply(*, had_operations: bool, apply_errors: list[dict[str, An
 
 def handle(ctx: TurnContext) -> IntentResult:
     ctx.trace.append({"phase": "intent", "intent": "schedule_write"})
-    reply, operations, spec_dbg = run_specialist(ctx)
-    ctx.trace.append({"phase": "specialist", "operation_count": len(operations)})
-
-    resolved_scope = ctx.preview_range.as_dict() if ctx.preview_range else None
-    reply, applied, apply_errors, months, guard_trace = apply_with_guard(
-        ctx.store,
-        route="schedule_write",
-        reply=reply,
-        operations=operations,
-        user_message=ctx.message,
-        resolved_scope=resolved_scope,
+    reply, applied, spec_dbg, apply_errors, months, _guard_trace, operations = specialist_with_calendar_apply(
+        ctx, route="schedule_write"
     )
-    if guard_trace:
-        ctx.trace.append({"phase": "direct_apply", **guard_trace, "errors": apply_errors})
 
     if months and not apply_errors:
         if not reply:

@@ -20,7 +20,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field, field_validator
 
-from todai.agent.core.clarify import reply_is_clarifying
+from todai.agent.core.operation_guard import reply_is_clarifying
 from todai.agent.routing.preview_range import AGENT_WINDOW_DAYS, agent_window_bounds
 from todai.api.middleware.rate_limit import TurnAllowance, current_turn_user_id, groq_tracker, rate_limit_user_message
 from todai.agent.planner.groq_config import GROQ_API_KEY, GROQ_BASE_URL, GROQ_MODEL
@@ -48,7 +48,7 @@ class RouterOutput(BaseModel):
     @field_validator("time_scope", mode="before")
     @classmethod
     def _norm_time_scope(cls, v: Any) -> str:
-        from todai.agent.routing.time_scope import normalize_time_scope
+        from todai.agent.routing.preview_range import normalize_time_scope
 
         return normalize_time_scope(str(v) if v is not None else None)
 
@@ -64,10 +64,17 @@ class RouterOutput(BaseModel):
 
 
 def parse_router_output(raw: dict[str, Any]) -> tuple[RouterOutput | None, list[dict[str, Any]]]:
-    from todai.agent.routing.time_scope import normalize_router_tools
+    from todai.agent.routing.preview_range import normalize_router_tools
 
     if not isinstance(raw, dict):
         return None, [{"code": "INVALID_ROUTER", "detail": "expected object"}]
+    dbg = raw.get("_groq_debug")
+    if isinstance(dbg, dict) and dbg.get("ok") is False:
+        return None, [{"code": "GROQ_ROUTER_FAILED", "detail": dbg}]
+    reply = str(raw.get("replyText") or raw.get("reply_text") or "").strip()
+    has_route = bool(raw.get("route") or raw.get("state") or raw.get("prompt"))
+    if reply and not has_route and re.search(r"rate limit|groq http", reply, re.I):
+        return None, [{"code": "GROQ_RATE_LIMIT", "detail": reply[:200]}]
     normalized = {
         "route": raw.get("route") or raw.get("state") or raw.get("prompt"),
         "time_scope": raw.get("time_scope") or raw.get("scope") or raw.get("timeScope") or "default",
@@ -442,7 +449,7 @@ def groq_chat_json(
     if status is not None and status >= 400:
         if status == 429:
             snap = groq_tracker.usage_snapshot(user_id)
-            wait = int(snap.get("retry_after_seconds") or 60)
+            wait = int(min(snap.get("retry_after_seconds") or 60, 60))
             return {
                 "replyText": f"Groq rate limit (429). Wait about {wait}s and try again.",
                 "operations": [],
@@ -482,8 +489,11 @@ def groq_chat_json(
 
 
 def mock_route(message: str) -> dict[str, Any]:
-    from todai.agent.routing.preview_read_kind import PreviewReadKind, classify_preview_read
-    from todai.agent.routing.time_scope import infer_time_scope_from_message
+    from todai.agent.routing.preview_range import (
+        PreviewReadKind,
+        classify_preview_read,
+        infer_time_scope_from_message,
+    )
 
     m = message.lower().strip()
     today_d = date(2026, 5, 19)
@@ -502,10 +512,12 @@ def mock_route(message: str) -> dict[str, Any]:
             "my week",
             "this week",
             "upcoming",
+            "coming sch",
+            "my sch",
         )
     ):
         route = AgentRoute.SCHEDULE_PREVIEW.value
-    elif ("schedule" in m or "calendar" in m) and len(m) > 12:
+    elif re.search(r"\bsch[ae]?du\w*\b", m) and len(m) > 12:
         route = AgentRoute.SCHEDULE_PREVIEW.value
     else:
         route = AgentRoute.CHAT.value
@@ -629,3 +641,35 @@ def parse_specialist_output(raw: dict[str, Any]) -> tuple[str, list[dict[str, An
     if operations and reply_is_clarifying(reply):
         return reply, []
     return reply, operations
+
+
+def run_router(
+    *,
+    current_message: str,
+    history: list[dict[str, str]],
+    server_snapshot: dict[str, Any],
+    conversation: dict[str, Any],
+    date_anchor: dict[str, Any] | None = None,
+) -> tuple[RouterOutput | None, list[dict[str, Any]], dict[str, Any] | None]:
+    from todai.agent.core.context import groq_router_context
+
+    routing_context = groq_router_context(history, current_message)
+    raw = route_turn(
+        current_message=current_message,
+        routing_context=routing_context or None,
+        server_snapshot=server_snapshot,
+        conversation=conversation,
+        date_anchor=date_anchor,
+    )
+    router_dbg = raw.pop("_groq_debug", None) if isinstance(raw, dict) else None
+    out, errs = parse_router_output(raw if isinstance(raw, dict) else {})
+    if out is None:
+        fallback = mock_route(current_message)
+        fb_dbg = fallback.pop("_groq_debug", None)
+        out, fb_errs = parse_router_output(fallback)
+        errs = [*errs, *fb_errs]
+        if isinstance(router_dbg, dict):
+            router_dbg = {**router_dbg, "rules_fallback": True, "fallback_ok": bool(out)}
+        else:
+            router_dbg = {"rules_fallback": True, "fallback_ok": bool(out), **(fb_dbg or {})}
+    return out, errs, router_dbg

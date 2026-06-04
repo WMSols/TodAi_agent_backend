@@ -29,11 +29,11 @@ from todai.goal_planner.interrogation import (
     question_for_step,
 )
 from todai.goal_planner.ai_intake import handle_ai_confirm, handle_ai_intake_turn, uses_ai_intake
-from todai.goal_planner.plan_state import plan_needs_task_setup
+from todai.goal_planner.plan_resolver import plan_needs_task_setup
 from todai.goal_planner.session_store import GoalPlanSessionStore
 
 from todai.agent.tools.calendar import execute_read_tools
-from todai.goal_planner.routing.contracts import normalize_router_tools
+from todai.goal_planner.routing import normalize_router_tools
 
 UiMode = str  # "my_goals" | "new_goal"
 
@@ -45,6 +45,7 @@ def orchestrate_goal_turn(
     *,
     history: list[dict[str, Any]] | None = None,
     ui_mode: str = "my_goals",
+    allow_groq: bool = True,
 ) -> tuple[str, dict[str, Any], str, list[dict[str, Any]]]:
     """
     Returns (reply, session_patch, route, tool_trace).
@@ -70,6 +71,7 @@ def orchestrate_goal_turn(
         history=history,
         ui_mode=ui_mode,
         needs_task_setup=needs_setup,
+        allow_groq=allow_groq,
     )
     setup_mode = intake_mode
     route = route_out.route

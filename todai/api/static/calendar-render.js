@@ -53,25 +53,25 @@ function renderScheduleDisplay(display, options) {
   }
 
   const grid = document.createElement("div");
-  grid.className = "cal-grid";
+  grid.className = "sched-grid";
   days.forEach(function (day) {
     const row = document.createElement("div");
-    row.className = "cal-day";
+    row.className = "sched-day";
 
     const dateCol = document.createElement("div");
-    dateCol.className = "cal-day-date";
+    dateCol.className = "sched-day-date";
     const wd = document.createElement("div");
-    wd.className = "cal-day-weekday";
+    wd.className = "sched-day-weekday";
     wd.textContent = day.weekday || "";
     const dn = document.createElement("div");
-    dn.className = "cal-day-num";
+    dn.className = "sched-day-num";
     dn.textContent = (day.day != null ? day.day : "") + (day.month ? " " + day.month : "");
     dateCol.appendChild(wd);
     dateCol.appendChild(dn);
     row.appendChild(dateCol);
 
     const slotsCol = document.createElement("div");
-    slotsCol.className = "cal-day-slots";
+    slotsCol.className = "sched-day-slots";
     const slots = day.slots || [];
     if (!slots.length) {
       const none = document.createElement("div");

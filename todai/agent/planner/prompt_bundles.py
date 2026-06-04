@@ -13,7 +13,7 @@ from todai.agent.routing.preview_range import (
     agent_window_as_dict,
     user_request_outside_agent_window,
 )
-from todai.agent.routing.preview_read_kind import PreviewReadKind, classify_preview_read
+from todai.agent.routing.preview_range import PreviewReadKind, classify_preview_read
 # Cap specialist calendar JSON (~3k chars ≈ under 1k tokens for typical weeks)
 _SPECIALIST_BLOCKS_CAP = 4500
 _MONTH_DIGEST_THRESHOLD = 18

@@ -13,8 +13,7 @@ import re
 from typing import Any
 
 from todai.agent.planner.llm import AgentRoute, RouterOutput
-from todai.agent.routing.goal_redirect import should_redirect_to_goal_planner
-from todai.agent.routing.time_scope import strip_router_tool_dates
+from todai.agent.routing.preview_range import strip_router_tool_dates
 
 _WRITE_VERBS = re.compile(r"\b(add|book|create|reschedule)\b", re.I)
 _DELETE_VERBS = re.compile(r"\b(remove|delete|cancel|clear)\b", re.I)
@@ -29,6 +28,11 @@ _SCHEDULE_QUESTION = re.compile(
     r"\b(?:what|which|when)\b.+\b(?:my|the)\s+schedul",
     re.I,
 )
+_WHAT_MY_SCHEDULE = re.compile(
+    r"\bwhat\b.*\b(?:is|are)\b.*\b(?:my|the)\b.*\bsch[ae]?du\w*",
+    re.I,
+)
+_SCHEDULE_WORD = re.compile(r"\bsch[ae]?du\w*\b", re.I)
 _DAY_WORD = re.compile(
     r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
     r"tomorrow|today)\b",
@@ -108,13 +112,15 @@ def is_schedule_preview_read(message: str) -> bool:
             continue
         if _PREVIEW_READ.search(m):
             return True
+        if _WHAT_MY_SCHEDULE.search(m):
+            return True
         if _SCHEDULE_QUESTION.search(m) and (_DAY_WORD.search(m) or _MONTH_READ.search(m)):
             return True
-        if re.search(r"\bwhat\b.+\bschedul", m) and (_DAY_WORD.search(m) or _MONTH_READ.search(m)):
+        if re.search(r"\bwhat\b.+\bsch[ae]?du\w*", m) and (_DAY_WORD.search(m) or _MONTH_READ.search(m)):
             return True
-        if re.search(r"\b(?:what|which|show)\b.+\bschedul", m) and _MONTH_READ.search(m):
+        if re.search(r"\b(?:what|which|show)\b.+\bsch[ae]?du\w*", m) and _MONTH_READ.search(m):
             return True
-        if _MONTH_READ.search(m) and re.search(r"\bschedul", m):
+        if _MONTH_READ.search(m) and _SCHEDULE_WORD.search(m):
             return True
         if _MONTH_READ.search(m) and re.search(
             r"\b(?:what|which|show|have|got)\b.+\b(?:for|in)\b", m
@@ -168,6 +174,75 @@ def is_plain_chat_message(message: str) -> bool:
 
 # Tests / older callers
 is_general_chat_message = is_plain_chat_message
+
+
+_GOALS_LIST = re.compile(
+    r"\b(review goals?|my goals?|list goals?|show goals?|view goals?|all goals?|"
+    r"existing goals?|what are my goals?)\b",
+    re.I,
+)
+_GOAL_PROGRESS = re.compile(r"\bwhat\b.*\bgoals?\b", re.I)
+_GOAL_DELETE = re.compile(
+    r"\b(delete|remove|cancel|clear|drop)\b.*\b(goal|goals|plan|tasks?)\b|"
+    r"\b(goal|goals|plan|tasks?)\b.*\b(delete|remove|cancel|clear)\b",
+    re.I,
+)
+_GOAL_SETUP = re.compile(
+    r"\b(create|generate|build|make|add|set\s*up|start)\b.*\b(tasks?|plan|schedule|goal)\b|"
+    r"\b(tasks?|plan)\b.*\b(for|to)\b.*\b(this|my|the)?\s*goal\b|"
+    r"\bnew\s+goal\b|\bgoal\s+plan\b|\b7[- ]?day\b.*\b(plan|goal)\b|"
+    r"\b(confirm|okay|yes)\b.*\b(plan|tasks?)\b",
+    re.I,
+)
+_GOAL_TASKS_FOR_GOAL = re.compile(
+    r"\b(task|tasks)\b.*\b(this|my|the)\s+goal\b|"
+    r"\bgoal\b.*\b(task|tasks)\b",
+    re.I,
+)
+_GOAL_INTAKE = re.compile(
+    r"\b(objective|difficulty|tasks per day|minutes per day|hours daily|days per week)\b",
+    re.I,
+)
+_COMBINED_SCHEDULE = re.compile(
+    r"\b(?:what'?s on|what\s+are|show|view|preview|my)\b.*\b(?:schedule|calendar|week)\b|"
+    r"\bschedule\b.*\b(?:week|today|tomorrow)\b|"
+    r"\bwhat\b.*\b(?:is|are)\b.*\b(?:my|the)\b.*\bschedul",
+    re.I,
+)
+
+GOAL_PLANNER_REDIRECT_REPLY = (
+    "Goal plans (create, edit, delete, and 7-day tasks) live in the **Goal planner** tab. "
+    "Open **Goal planner** → **My goals** or **New goal**.\n\n"
+    "Here in **Calendar**, I can show your **combined week** (events + goal tasks) — "
+    "e.g. *what's on my schedule this week*."
+)
+
+
+def should_redirect_to_goal_planner(message: str) -> bool:
+    """
+    True when the user is asking for goal lifecycle / management, not a calendar-only view.
+    Combined schedule questions stay on the calendar agent (with goal overlay).
+    """
+    text = (message or "").strip()
+    if not text:
+        return False
+    if _COMBINED_SCHEDULE.search(text) and not _GOAL_DELETE.search(text):
+        if _GOALS_LIST.search(text) and _COMBINED_SCHEDULE.search(text):
+            return False
+        return False
+    if _GOALS_LIST.search(text) or _GOAL_PROGRESS.search(text):
+        return True
+    if _GOAL_DELETE.search(text):
+        return True
+    if _GOAL_SETUP.search(text):
+        return True
+    if _GOAL_TASKS_FOR_GOAL.search(text):
+        return True
+    if _GOAL_INTAKE.search(text) and re.search(r"\bgoal\b", text, re.I):
+        return True
+    if re.search(r"\bgoal\s+planner\b", text, re.I):
+        return True
+    return False
 
 
 def is_write_followup(message: str, last_agent_mode: str | None) -> bool:

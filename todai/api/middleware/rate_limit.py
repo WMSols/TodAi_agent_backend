@@ -23,6 +23,8 @@ _turn_user_id: ContextVar[str] = ContextVar("groq_turn_user_id", default="defaul
 _DAY_SEC = 86400.0
 _DEFAULT_REQUESTS_PER_TURN = 2
 _DEFAULT_TOKENS_PER_TURN = 2500
+# Groq Retry-After can be large (e.g. 117s); cap cooldown for UX and pre-flight blocks.
+_GROQ_COOLDOWN_CAP_SEC = 60.0
 
 
 def _env_int(name: str, default: int) -> int:
@@ -56,6 +58,10 @@ def _seconds_until_next_minute() -> float:
     return max(0.0, 60.0 - (time.time() % 60.0))
 
 
+def _cap_groq_retry(seconds: float) -> float:
+    return max(1.0, min(float(seconds), _GROQ_COOLDOWN_CAP_SEC))
+
+
 @dataclass
 class TurnAllowance:
     allowed: bool
@@ -84,7 +90,7 @@ class GroqRateTracker:
         self._day_requests: list[float] = []
         self._day_tokens: list[tuple[float, int]] = []
         self._last_turn: dict[str, dict[str, Any]] = {}
-        self._last_block: dict[str, Any] = {}
+        self._last_block: dict[str, Any] = {}  # external=True when Groq returned 429
 
     def begin_turn(self, user_id: str) -> None:
         _turn_user_id.set(user_id)
@@ -132,12 +138,34 @@ class GroqRateTracker:
     def _wait_for_minute_reset(self) -> float:
         return max(1.0, round(_seconds_until_next_minute(), 1))
 
+    def _external_block_allowance(self) -> TurnAllowance | None:
+        """Groq returned 429 — block new HTTP calls until cooldown expires."""
+        with self._lock:
+            block = self._last_block
+        if not block.get("external"):
+            return None
+        until = float(block.get("until") or 0)
+        remaining = until - time.time()
+        if remaining <= 0:
+            return None
+        wait = max(1.0, round(remaining, 1))
+        hit = str(block.get("limit_hit") or "rpm")
+        return TurnAllowance(
+            False,
+            wait,
+            hit,
+            f"Groq rate limit (429). Wait about {int(min(wait, _GROQ_COOLDOWN_CAP_SEC))}s and try again.",
+        )
+
     def check_turn_allowed(
         self,
         *,
         planned_requests: int = _DEFAULT_REQUESTS_PER_TURN,
         planned_tokens: int = _DEFAULT_TOKENS_PER_TURN,
     ) -> TurnAllowance:
+        external = self._external_block_allowance()
+        if external is not None:
+            return external
         limits = groq_limits()
         counts = self._snapshot_counts()
         rpm_after = counts["rpm_used"] + planned_requests
@@ -216,14 +244,21 @@ class GroqRateTracker:
                 self._day_tokens.append((now, tokens))
 
     def set_external_retry(self, retry_after_seconds: float, limit_hit: str = "rpm") -> None:
-        wait = max(retry_after_seconds, _seconds_until_next_minute())
+        wait = _cap_groq_retry(retry_after_seconds)
         with self._lock:
             self._last_block = {
-                "retry_after_seconds": max(1.0, wait),
+                "retry_after_seconds": wait,
                 "limit_hit": limit_hit,
+                "external": True,
+                "until": time.time() + wait,
             }
 
     def _clear_block_if_under_limits(self, limits: dict[str, int], counts: dict[str, Any]) -> None:
+        block = self._last_block
+        if block.get("external"):
+            until = float(block.get("until") or 0)
+            if until > time.time():
+                return
         over = (
             counts["rpm_used"] >= limits["rpm"]
             or counts["tpm_used"] >= limits["tpm"]
@@ -233,7 +268,20 @@ class GroqRateTracker:
         if not over:
             self._last_block = {}
 
+    def mark_preflight_only_turn(self, user_id: str) -> None:
+        """Current turn used rules/local only — do not show prior turn's Groq phases in UI."""
+        with self._lock:
+            self._last_turn[user_id] = {
+                "turn_requests": 0,
+                "turn_phases": [],
+                "turn_tokens": 0,
+                "preflight_only": True,
+            }
+
     def _turn_stats(self, user_id: str) -> tuple[int, list[str], int]:
+        with self._lock:
+            if (self._last_turn.get(user_id) or {}).get("preflight_only"):
+                return 0, [], 0
         turn = _turn_calls.get() or []
         http_calls = [c for c in turn if not c.get("skipped")]
         tokens_turn = sum(int(c.get("tokens") or 0) for c in http_calls)
@@ -247,13 +295,14 @@ class GroqRateTracker:
                     "turn_tokens": tokens_turn,
                 }
             return count, phases, tokens_turn
+        # No Groq HTTP this turn — report zero (not a previous turn's failed router).
         with self._lock:
-            last = self._last_turn.get(user_id) or {}
-        return (
-            int(last.get("turn_requests", 0)),
-            list(last.get("turn_phases") or []),
-            int(last.get("turn_tokens", 0)),
-        )
+            self._last_turn[user_id] = {
+                "turn_requests": 0,
+                "turn_phases": [],
+                "turn_tokens": 0,
+            }
+        return 0, [], 0
 
     def usage_snapshot(self, user_id: str) -> dict[str, Any]:
         limits = groq_limits()
@@ -287,7 +336,24 @@ class GroqRateTracker:
             "retry_after_seconds": 0,
             "limit_hit": None,
         }
-        if block.get("retry_after_seconds"):
+        with self._lock:
+            last_turn = dict(self._last_turn.get(user_id) or {})
+        if last_turn.get("preflight_only"):
+            out["preflight_only"] = True
+        if turn_requests == 0 and (
+            last_turn.get("preflight_only") or block.get("external")
+        ):
+            out["turn_groq_skipped"] = True
+        if block.get("external"):
+            until = float(block.get("until") or 0)
+            remaining = until - time.time()
+            if remaining > 0:
+                out["rate_limited"] = True
+                out["retry_after_seconds"] = max(1.0, round(remaining, 1))
+                out["limit_hit"] = block.get("limit_hit")
+                if turn_requests == 0:
+                    out["cooldown_from_prior"] = True
+        elif block.get("retry_after_seconds"):
             out["rate_limited"] = True
             out["retry_after_seconds"] = max(block["retry_after_seconds"], counts["minute_resets_in_sec"])
             out["limit_hit"] = block.get("limit_hit")

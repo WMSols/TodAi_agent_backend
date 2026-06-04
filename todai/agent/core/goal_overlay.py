@@ -5,8 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from typing import Any
 
-from todai.agent.core.display import _empty_day_row, build_schedule_display
-from todai.database.config import use_local_storage
+from todai.agent.core.schedule_display import _empty_day_row, build_schedule_display
 from todai.goal_planner.display import _fmt_time, _status_label
 from todai.goal_planner.session_store import GoalPlanSessionStore
 
@@ -85,8 +84,6 @@ def merge_goal_tasks_into_display(
 
 
 def fetch_goal_tasks_for_period(user_id: str, period_from: str, period_to: str) -> list[dict[str, Any]]:
-    if use_local_storage():
-        return []
     try:
         start = date.fromisoformat(period_from[:10])
         end = date.fromisoformat(period_to[:10])

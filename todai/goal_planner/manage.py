@@ -8,10 +8,11 @@ from datetime import date
 from typing import Any
 
 from todai.agent.planner.groq_config import GROQ_API_KEY
+from todai.agent.core.groq_errors import is_groq_failure_reply
 from todai.agent.planner.llm import groq_chat_json
 from todai.goal_planner.display import build_goal_plan_schedule_display
 from todai.goal_planner.interrogation import parse_confirmation
-from todai.goal_planner.routing.context import groq_goal_manage_context
+from todai.goal_planner.routing import groq_goal_manage_context
 from todai.goal_planner.session_store import GoalPlanSessionStore
 from todai.goal_planner.tools import (
     execute_delete_all_goals,
@@ -95,7 +96,7 @@ def handle_goal_manage(
         if _DELETE_ALL_PATTERNS.search(message):
             action = "delete_all"
         elif re.search(r"\b(delete|remove|clear|drop)\b", message, re.I):
-            from todai.goal_planner.routing.rules_router import match_operational_intent
+            from todai.goal_planner.routing import match_operational_intent
 
             op = match_operational_intent(message)
             if op and op.manage_action in ("delete_goal", "delete_plan", "delete_all"):
@@ -201,7 +202,9 @@ def _groq_manage_reply(
     ]
     try:
         raw = groq_chat_json(messages, phase="goal_manage", max_tokens=400, temperature=0.2)
-        text = raw.get("replyText") or raw.get("reply_text") or ""
-        return str(text).strip() or None
+        text = str(raw.get("replyText") or raw.get("reply_text") or "").strip()
+        if not text or is_groq_failure_reply(text):
+            return None
+        return text
     except Exception:
         return None

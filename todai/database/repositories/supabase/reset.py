@@ -24,6 +24,7 @@ def reset_user_supabase(user_id: str) -> dict[str, Any]:
         ("conversation_context", None),
         ("conversations", "user_id"),
         ("calendar_events", "user_id"),
+        ("calendar_recurrence", "user_id"),
     ):
         if table == "conversation_context":
             convs = client.table("conversations").select("id").eq("user_id", db_id).execute()
