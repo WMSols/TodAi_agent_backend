@@ -53,7 +53,7 @@ python main.py
 2. In Render: **New → Blueprint** and select the repo (`render.yaml`), **or** **New → Web Service** with:
    - **Runtime:** Python
    - **Build command:** `pip install -r requirements.txt`
-   - **Start command:** `uvicorn todai.api.main:app --host 0.0.0.0 --port $PORT`
+   - **Start command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
    - **Health check path:** `/health`
 3. Set environment variables (see `.env.example`). Required on Render:
    - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`

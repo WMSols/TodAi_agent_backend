@@ -19,6 +19,7 @@ if str(_root) not in sys.path:
 
 import uvicorn
 
+from todai.api.main import app  # noqa: F401 — Render / uvicorn main:app
 from todai.database.config import server_port
 
 HOST = os.environ.get("TODAI_HOST", "0.0.0.0")

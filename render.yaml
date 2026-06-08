@@ -9,7 +9,8 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn todai.api.main:app --host 0.0.0.0 --port $PORT
+    # Either start command works after main.py re-exports app:
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
