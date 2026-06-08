@@ -10,7 +10,6 @@ __pycache__/
 
 # --- Legacy root static (UI lives in todai/api/static/) ---
 /static/
-.env.example
 docs/DEGRADED_AGENT.md
 docs/SANDBOX_PHASES.md
 tests/test_agent_window.py
@@ -37,3 +36,5 @@ tests/test_message_buckets.py
 tests/test_preview_read_kind.py
 F:\TodAi\tests
 docs/flutter-api-simple.md
+docs/supabase/003_calendar_recurrence_daily.sql
+.env.example

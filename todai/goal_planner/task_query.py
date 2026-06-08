@@ -83,6 +83,25 @@ _FULL_WEEK = re.compile(
     r"\b(?:this|my)\s+(?:goal|plan)\b.*\b(?:tasks?|progress)\b",
     re.I,
 )
+_EXPLICIT_WEEK_LIST = re.compile(
+    r"\b(?:"
+    r"all\s+tasks?|show\s+my\s+plan|full\s+(?:week|plan)|whole\s+week|"
+    r"entire\s+(?:week|plan)|this\s+week|week(?:ly)?\s+(?:tasks?|plan|overview)|"
+    r"7[- ]?day(?:\s+plan)?|every\s+day|each\s+day"
+    r")\b",
+    re.I,
+)
+_IMPLICIT_TODAY_TASKS = re.compile(
+    r"\b(?:"
+    r"any\s+tasks?|"
+    r"do\s+i\s+have\s+(?:any\s+)?tasks?|"
+    r"got\s+(?:any\s+)?tasks?|"
+    r"tasks?\s+(?:for\s+)?today|"
+    r"today'?s?\s+tasks?|"
+    r"what\s+(?:do\s+i\s+have|(?:are|is)\s+my\s+tasks?)\s+today"
+    r")\b",
+    re.I,
+)
 _GUIDANCE = re.compile(
     r"\b(?:how\s+(?:do|can|should)|help\s+(?:me\s+)?(?:with|on)|"
     r"guide\s+me|walk\s+me\s+through|explain|elaborate|"
@@ -90,7 +109,11 @@ _GUIDANCE = re.compile(
     r"advice|stuck\s+on|don't\s+know\s+how)\b",
     re.I,
 )
-_DELETE_VERB = re.compile(r"\b(?:delete|remove|clear|drop)\b", re.I)
+_DELETE_VERB = re.compile(
+    r"\b(?:delete|deletes|deleting|deleted|remove|removes|removing|removed|"
+    r"clear|clears|clearing|drop|drops|dropping)\b",
+    re.I,
+)
 _TASK_ORDINAL = re.compile(
     r"\b(first|second|third|fourth|1st|2nd|3rd|4th|last)\s+task\b|"
     r"\btask\s*(#?\s*)(\d{1,2})\b",
@@ -129,8 +152,67 @@ def parse_day_dates_in_message(text: str, *, start: date, end: date) -> list[dat
     return day_dates
 
 
+_ORDINAL_ONE_BASED: dict[str, int] = {
+    "first": 1,
+    "1st": 1,
+    "second": 2,
+    "2nd": 2,
+    "third": 3,
+    "3rd": 3,
+    "fourth": 4,
+    "4th": 4,
+}
+_HAS_TASK_ORDINAL = re.compile(
+    r"\b(?:first|second|third|fourth|1st|2nd|3rd|4th|last)\s+tasks?\b|"
+    r"\btasks?\s*#?\s*\d{1,2}\b|"
+    r"\b\d{1,2}(?:st|nd|rd|th)?\s+tasks?\b",
+    re.I,
+)
+
+
+def _ordinal_indices_from_message(message: str, *, max_tasks: int) -> list[int]:
+    """1-based task positions mentioned in message (sorted, unique)."""
+    text = (message or "").lower()
+    found: set[int] = set()
+    if re.search(r"\blast\s+task\b", text) and max_tasks >= 1:
+        found.add(max_tasks)
+    for word, one_based in _ORDINAL_ONE_BASED.items():
+        if re.search(rf"\b{re.escape(word)}\b", text) and one_based <= max_tasks:
+            found.add(one_based)
+    for m in re.finditer(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+tasks?\b", text):
+        n = int(m.group(1))
+        if 1 <= n <= max_tasks:
+            found.add(n)
+    for m in re.finditer(r"\btasks?\s*#?\s*(\d{1,2})\b", text):
+        n = int(m.group(1))
+        if 1 <= n <= max_tasks:
+            found.add(n)
+    m = _TASK_ORDINAL.search(message or "")
+    if m and m.group(2):
+        n = int(m.group(2))
+        if 1 <= n <= max_tasks:
+            found.add(n)
+    return sorted(found)
+
+
+def resolve_task_ordinals(message: str, tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Map '2nd and third task', etc. to task rows (sorted by sort_order)."""
+    if not tasks:
+        return []
+    ordered = sorted(tasks, key=lambda x: int(x.get("sort_order") or 0))
+    indices = _ordinal_indices_from_message(message, max_tasks=len(ordered))
+    if not indices:
+        return []
+    return [ordered[i - 1] for i in indices]
+
+
 def resolve_task_ordinal(message: str, tasks: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Map 'first task', 'task 2', etc. to one task row (sorted by sort_order)."""
+    multi = resolve_task_ordinals(message, tasks)
+    if len(multi) == 1:
+        return multi[0]
+    if len(multi) > 1:
+        return None
     if not tasks:
         return None
     ordered = sorted(tasks, key=lambda x: int(x.get("sort_order") or 0))
@@ -223,17 +305,30 @@ def _match_tasks_by_title(message: str, tasks: list[dict[str, Any]]) -> list[dic
     return matches
 
 
+def _today_in_plan_window(today_iso: str | None, *, start: date, end: date) -> date | None:
+    if not today_iso:
+        return None
+    try:
+        today_d = date.fromisoformat(str(today_iso)[:10])
+    except ValueError:
+        return None
+    if start <= today_d <= end:
+        return today_d
+    return None
+
+
 def parse_task_summary_query(
     message: str,
     *,
     start: date,
     end: date,
     tasks: list[dict[str, Any]],
+    today_iso: str | None = None,
 ) -> TaskSummaryQuery:
     """
     Decide how to narrow goal_tasks_summary replies.
 
-    Priority: explicit day/date > task title match > progress-only > full week.
+    Priority: explicit day/date > task title match > implicit today > progress-only > full week.
     """
     text = (message or "").strip()
     if not text:
@@ -276,15 +371,24 @@ def parse_task_summary_query(
                 matched_tasks=tuple(matched),
             )
 
+    if _PROGRESS.search(text) and not _LIST_INTENT.search(text):
+        return TaskSummaryQuery(scope="progress_only")
+
+    today_d = _today_in_plan_window(today_iso, start=start, end=end)
+    if today_d and _IMPLICIT_TODAY_TASKS.search(text) and not _EXPLICIT_WEEK_LIST.search(text):
+        iso = today_d.isoformat()
+        return TaskSummaryQuery(
+            scope="day",
+            dates=(iso,),
+            day_label=_day_label_for([today_d]),
+        )
+
     if _FULL_WEEK.search(text) and not re.search(
         r"\b(?:on|for)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\b",
         text,
         re.I,
     ):
         return TaskSummaryQuery(scope="week")
-
-    if _PROGRESS.search(text) and not _LIST_INTENT.search(text):
-        return TaskSummaryQuery(scope="progress_only")
 
     return TaskSummaryQuery(scope="week")
 

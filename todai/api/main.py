@@ -30,6 +30,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -46,9 +47,17 @@ from todai.api.local_auth import login_local_user, register_local_user
 from todai.api.service import bootstrap_user_profile, get_debug_state, process_chat
 from todai.agent.planner.groq_config import planner_mode
 from todai.api.logging import log_api_response, logger, setup_logging
-from todai.database.config import firebase_configured, local_auth_configured, storage_backend_label, supabase_configured
+from todai.database.config import (
+    cors_allowed_origins,
+    firebase_configured,
+    local_auth_configured,
+    server_port,
+    storage_backend_label,
+    supabase_configured,
+)
 from todai.api.calendar_router import router as calendar_router
 from todai.api.goal_plan import router as goal_plan_router
+from todai.api.goal_debug_router import router as goal_debug_router
 from todai.api.goal_tasks_router import router as goal_tasks_router
 from todai.api.openapi_docs import (
     DOC_AUTH_BOOTSTRAP,
@@ -86,7 +95,20 @@ app = FastAPI(
     license_info={"name": "Proprietary"},
 )
 install_openapi(app)
+
+_cors_origins = cors_allowed_origins()
+if _cors_origins:
+    _cors_kwargs: dict[str, object] = {
+        "allow_origins": _cors_origins,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
+    if _cors_origins != ["*"]:
+        _cors_kwargs["allow_credentials"] = True
+    app.add_middleware(CORSMiddleware, **_cors_kwargs)
+
 app.include_router(goal_plan_router)
+app.include_router(goal_debug_router)
 app.include_router(goal_tasks_router)
 app.include_router(calendar_router)
 
@@ -275,6 +297,15 @@ def index():
     return FileResponse(index_path)
 
 
+@app.get("/goal-debug")
+def goal_debug_ui():
+    """Separate debug UI for goal routes, prompts, and execution traces."""
+    debug_path = STATIC_DIR / "goal-debug" / "index.html"
+    if not debug_path.exists():
+        raise HTTPException(status_code=500, detail="Missing todai/api/static/goal-debug/index.html")
+    return FileResponse(debug_path)
+
+
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -283,7 +314,7 @@ if __name__ == "__main__":
     import uvicorn
 
     host = os.environ.get("TODAI_HOST", "0.0.0.0")
-    port = int(os.environ.get("TODAI_PORT", "8000"))
+    port = server_port()
     print(f"TodAI — http://127.0.0.1:{port}/", flush=True)
     uvicorn.run(
         "todai.api.main:app",

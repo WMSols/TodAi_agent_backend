@@ -209,6 +209,19 @@
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
+    .goal-traces-link {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #93c5fd;
+      text-decoration: none;
+      padding: 0.35rem 0.65rem;
+      border-radius: 8px;
+      border: 1px solid #2a3545;
+      background: #1e2a3d;
+    }
+    .goal-traces-link:hover { border-color: #3b82f6; color: #fff; }
+    .goal-traces-bar { margin-left: auto; }
+
     #goal-plan-select {
       flex: 1;
       min-width: 12rem;
@@ -1008,6 +1021,38 @@
       color: #fde68a;
     }
     .cal-form-hidden { display: none !important; }
+    .ev-series-panel {
+      margin: 0.5rem 0 0.65rem;
+      padding: 0.55rem 0.65rem;
+      border-radius: 8px;
+      border: 1px solid #2a3545;
+      background: #1a2230;
+    }
+    .ev-series-panel legend {
+      font-size: 0.72rem;
+      color: var(--muted);
+      padding: 0 0.25rem;
+    }
+    .ev-series-scope {
+      border: none;
+      margin: 0.35rem 0 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .ev-series-scope label {
+      font-size: 0.78rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      cursor: pointer;
+    }
+    .ev-delete-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
     .events-hint {
       font-size: 0.72rem;
       color: var(--muted);
@@ -1047,24 +1092,45 @@
       opacity: 0.4;
       pointer-events: none;
     }
-    .recur-toggle-row {
+    .recur-type-group {
       display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      margin-bottom: 0.5rem;
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: #e2e8f0;
+      flex-direction: column;
+      gap: 0.45rem;
+      margin-bottom: 0.75rem;
     }
-    .recur-toggle-row input { width: 1rem; height: 1rem; accent-color: #7c3aed; }
-    #ev-recur-options {
+    .recur-type-card {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      grid-template-rows: auto auto;
+      gap: 0.1rem 0.55rem;
+      padding: 0.55rem 0.65rem;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      cursor: pointer;
+      background: #0f172a;
+    }
+    .recur-type-card input {
+      grid-row: 1 / span 2;
+      margin-top: 0.15rem;
+      accent-color: #7c3aed;
+    }
+    .recur-type-card:has(input:checked) {
+      border-color: #7c3aed;
+      background: #1e1b4b;
+    }
+    .recur-type-card strong { font-size: 0.85rem; color: #e2e8f0; }
+    .recur-type-card span {
+      grid-column: 2;
+      font-size: 0.75rem;
+      color: #94a3b8;
+    }
+    .recur-panel {
       display: flex;
       flex-direction: column;
       gap: 0.65rem;
     }
-    #ev-recur-options.recur-off {
-      opacity: 0.35;
-      pointer-events: none;
+    .recur-panel.recur-off {
+      display: none;
     }
     .recur-field label {
       display: block;
@@ -1300,6 +1366,7 @@
     <span class="mode-bar-label">Goal</span>
     <button type="button" class="goal-sub-btn active" data-goal-sub="chat" role="tab" aria-selected="true">My goals</button>
     <button type="button" class="goal-sub-btn" data-goal-sub="new" role="tab" aria-selected="false">New goal</button>
+    <a id="btn-goal-traces-bar" class="goal-traces-link goal-traces-bar" href="/goal-debug" target="_blank" rel="noopener" title="Execution trace dashboard">Traces</a>
   </div>
   <main class="layout">
     <section id="chat-panel">
@@ -1307,6 +1374,7 @@
         <label for="goal-plan-select">Goal</label>
         <select id="goal-plan-select" title="Choose a goal to chat with"></select>
         <button type="button" id="btn-goal-refresh-plans" title="Reload goal list">Refresh</button>
+        <a id="btn-goal-traces" class="goal-traces-link" href="/goal-debug" target="_blank" rel="noopener" title="Open execution trace dashboard">Traces</a>
       </div>
       <details id="goal-new-details" class="goal-new-details hidden" aria-label="Create a new goal">
         <summary>Create a new goal</summary>
@@ -1390,56 +1458,79 @@
           </div>
         </div>
         <details class="events-recur-box" id="ev-recur-details" open>
-          <summary>Weekly recurrence (optional)</summary>
+          <summary>Repeat (optional)</summary>
           <div class="events-recur-inner" id="ev-recur-inner">
-            <label class="recur-toggle-row">
-              <input type="checkbox" id="ev-recur-weekly" />
-              Repeat every week
-            </label>
-            <div id="ev-recur-options" class="recur-off">
+            <p class="recur-hint">Each occurrence is saved as its own calendar event.</p>
+            <div class="recur-type-group" role="radiogroup" aria-label="Recurrence type">
+              <label class="recur-type-card">
+                <input type="radio" name="ev-recur-type" value="none" checked />
+                <strong>Does not repeat</strong>
+                <span>Single event on the date above.</span>
+              </label>
+              <label class="recur-type-card">
+                <input type="radio" name="ev-recur-type" value="daily" />
+                <strong>Daily</strong>
+                <span>Same time every day for a set number of days.</span>
+              </label>
+              <label class="recur-type-card">
+                <input type="radio" name="ev-recur-type" value="weekly" />
+                <strong>Weekly</strong>
+                <span>Repeat on selected weekdays each week (starts on the date above).</span>
+              </label>
+            </div>
+            <div id="ev-recur-daily-panel" class="recur-panel recur-off">
+              <div class="recur-field">
+                <label for="ev-repeat-days">Repeat for how many days?</label>
+                <input type="number" id="ev-repeat-days" min="1" max="365" value="7" />
+                <p class="recur-hint">Includes the first day (e.g. 7 = one week of daily events).</p>
+              </div>
+            </div>
+            <div id="ev-recur-weekly-panel" class="recur-panel recur-off">
               <div class="recur-field">
                 <label for="ev-repeat-weeks">Repeat for how many weeks?</label>
                 <input type="number" id="ev-repeat-weeks" min="1" max="52" value="8" />
               </div>
               <div class="recur-field">
-                <span class="recur-field-label">Pattern (pick one)</span>
-                <div class="recur-pattern-group" role="radiogroup" aria-label="Recurrence pattern">
-                  <label class="recur-pattern-card">
-                    <input type="radio" name="ev-weekly-mode" value="same_day" checked />
-                    <strong>Same weekday</strong>
-                    <span>Repeats on the same day each week (e.g. every Tuesday).</span>
-                  </label>
-                  <label class="recur-pattern-card">
-                    <input type="radio" name="ev-weekly-mode" value="weekdays" />
-                    <strong>Each weekday</strong>
-                    <span>Mon–Fri blocks every week (minus days you skip below).</span>
-                  </label>
-                </div>
-              </div>
-              <div class="recur-field">
-                <span class="recur-field-label">Quick skip preset (pick one)</span>
-                <div class="recur-preset-row" id="ev-skip-presets">
-                  <button type="button" class="recur-preset-btn" data-preset="none">No skips</button>
-                  <button type="button" class="recur-preset-btn active" data-preset="weekends">Skip weekends</button>
-                  <button type="button" class="recur-preset-btn" data-preset="weekdays">Skip Mon–Fri</button>
-                </div>
-                <p class="recur-hint">Or tap days below to skip multiple days. Choosing a preset clears the other presets.</p>
+                <span class="recur-field-label">Skip weekdays</span>
+                <p class="recur-hint">Checked days are skipped. By default only the event date's weekday repeats — uncheck other days to include them each week.</p>
                 <div class="events-skip-days" id="ev-skip-days">
-                  <label class="recur-dow-pill skip-active"><input type="checkbox" data-dow="0" /> Mon</label>
-                  <label class="recur-dow-pill skip-active"><input type="checkbox" data-dow="1" /> Tue</label>
-                  <label class="recur-dow-pill skip-active"><input type="checkbox" data-dow="2" /> Wed</label>
-                  <label class="recur-dow-pill skip-active"><input type="checkbox" data-dow="3" /> Thu</label>
-                  <label class="recur-dow-pill skip-active"><input type="checkbox" data-dow="4" /> Fri</label>
-                  <label class="recur-dow-pill skip-active"><input type="checkbox" data-dow="5" checked /> Sat</label>
-                  <label class="recur-dow-pill skip-active"><input type="checkbox" data-dow="6" checked /> Sun</label>
+                  <label class="recur-dow-pill"><input type="checkbox" data-dow="0" /> Mon</label>
+                  <label class="recur-dow-pill"><input type="checkbox" data-dow="1" /> Tue</label>
+                  <label class="recur-dow-pill"><input type="checkbox" data-dow="2" /> Wed</label>
+                  <label class="recur-dow-pill"><input type="checkbox" data-dow="3" /> Thu</label>
+                  <label class="recur-dow-pill"><input type="checkbox" data-dow="4" /> Fri</label>
+                  <label class="recur-dow-pill"><input type="checkbox" data-dow="5" /> Sat</label>
+                  <label class="recur-dow-pill"><input type="checkbox" data-dow="6" /> Sun</label>
                 </div>
               </div>
             </div>
           </div>
         </details>
+        <input type="hidden" id="ev-recurrence-id" value="" />
+        <div id="ev-series-panel" class="ev-series-panel cal-form-hidden">
+          <p class="events-hint" id="ev-series-summary" style="margin-bottom:0.35rem;"></p>
+          <fieldset class="ev-series-scope">
+            <legend>Apply changes to</legend>
+            <label>
+              <input type="radio" name="ev-edit-scope" value="occurrence" checked />
+              This occurrence only
+            </label>
+            <label>
+              <input type="radio" name="ev-edit-scope" value="series" />
+              All events in this series
+            </label>
+          </fieldset>
+          <p class="events-hint" style="margin:0.35rem 0 0;">
+            Series edits update title, notes, and time on each occurrence's date. Date changes apply only when editing a single occurrence.
+          </p>
+        </div>
         <div class="cal-modal-actions">
           <button type="button" id="btn-ev-save">Save</button>
           <button type="button" id="btn-ev-delete" class="danger cal-form-hidden">Delete</button>
+          <div id="ev-delete-group" class="ev-delete-group cal-form-hidden">
+            <button type="button" id="btn-ev-delete-one" class="danger secondary">Delete this occurrence</button>
+            <button type="button" id="btn-ev-delete-series" class="danger">Delete entire series</button>
+          </div>
           <button type="button" id="btn-ev-cancel-edit" class="secondary">Cancel</button>
         </div>
       </div>
@@ -2546,21 +2637,35 @@
       closeDayListPanel();
     }
 
-    function evWeeklyModeValue() {
-      const r = document.querySelector('input[name="ev-weekly-mode"]:checked');
-      return r ? r.value : "same_day";
+    function evRecurTypeValue() {
+      const r = document.querySelector('input[name="ev-recur-type"]:checked');
+      return r ? r.value : "none";
     }
 
-    function syncRecurOptionsPanel() {
-      const on = document.getElementById("ev-recur-weekly").checked;
-      const panel = document.getElementById("ev-recur-options");
-      if (panel) panel.classList.toggle("recur-off", !on);
+    function weekdayFromEventDate() {
+      const iso = (document.getElementById("ev-date").value || "").trim();
+      if (!iso) return (new Date().getDay() + 6) % 7;
+      const p = iso.split("-");
+      const d = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+      return (d.getDay() + 6) % 7;
     }
 
-    function clearSkipPresetButtons() {
-      document.querySelectorAll("#ev-skip-presets .recur-preset-btn").forEach(function (btn) {
-        btn.classList.remove("active");
-      });
+    function applyWeeklySkipDefaultsFromDate() {
+      const anchorDow = weekdayFromEventDate();
+      const skip = [];
+      for (let d = 0; d < 7; d++) {
+        if (d !== anchorDow) skip.push(d);
+      }
+      setSkipDaysChecked(skip);
+    }
+
+    function syncRecurPanels() {
+      const t = evRecurTypeValue();
+      const daily = document.getElementById("ev-recur-daily-panel");
+      const weekly = document.getElementById("ev-recur-weekly-panel");
+      if (daily) daily.classList.toggle("recur-off", t !== "daily");
+      if (weekly) weekly.classList.toggle("recur-off", t !== "weekly");
+      if (t === "weekly") applyWeeklySkipDefaultsFromDate();
     }
 
     function setSkipDaysChecked(dows) {
@@ -2572,47 +2677,40 @@
       });
     }
 
-    function applySkipPreset(preset) {
-      clearSkipPresetButtons();
-      const btn = document.querySelector('#ev-skip-presets .recur-preset-btn[data-preset="' + preset + '"]');
-      if (btn) btn.classList.add("active");
-      if (preset === "none") {
-        setSkipDaysChecked([]);
-      } else if (preset === "weekends") {
-        setSkipDaysChecked([5, 6]);
-      } else if (preset === "weekdays") {
-        setSkipDaysChecked([0, 1, 2, 3, 4]);
-      }
-    }
-
-    function onSkipDayManualChange() {
-      clearSkipPresetButtons();
-    }
-
-    function onPatternRadioChange() {
-      const mode = evWeeklyModeValue();
-      if (mode === "weekdays") {
-        applySkipPreset("weekends");
-      }
-    }
-
     function initRecurFormUi() {
-      const weekly = document.getElementById("ev-recur-weekly");
-      if (weekly) {
-        weekly.addEventListener("change", syncRecurOptionsPanel);
-        syncRecurOptionsPanel();
-      }
-      document.querySelectorAll('input[name="ev-weekly-mode"]').forEach(function (r) {
-        r.addEventListener("change", onPatternRadioChange);
+      document.querySelectorAll('input[name="ev-recur-type"]').forEach(function (r) {
+        r.addEventListener("change", syncRecurPanels);
       });
-      document.querySelectorAll("#ev-skip-presets .recur-preset-btn").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          applySkipPreset(btn.getAttribute("data-preset"));
+      const evDate = document.getElementById("ev-date");
+      if (evDate) {
+        evDate.addEventListener("change", function () {
+          if (evRecurTypeValue() === "weekly") applyWeeklySkipDefaultsFromDate();
         });
-      });
-      document.querySelectorAll("#ev-skip-days input[data-dow]").forEach(function (cb) {
-        cb.addEventListener("change", onSkipDayManualChange);
-      });
+      }
+      syncRecurPanels();
+    }
+
+    function evRecurrencePayload() {
+      const t = evRecurTypeValue();
+      if (t === "none") {
+        return { enabled: false, frequency: "weekly", repeat_days: 7, repeat_weeks: 8, skip_days: [] };
+      }
+      if (t === "daily") {
+        return {
+          enabled: true,
+          frequency: "daily",
+          repeat_days: parseInt(document.getElementById("ev-repeat-days").value, 10) || 7,
+          repeat_weeks: 1,
+          skip_days: [],
+        };
+      }
+      return {
+        enabled: true,
+        frequency: "weekly",
+        repeat_days: 7,
+        repeat_weeks: parseInt(document.getElementById("ev-repeat-weeks").value, 10) || 8,
+        skip_days: evSkipDaysSelected(),
+      };
     }
 
     function openEventModal(ev, dateIso) {
@@ -2626,7 +2724,7 @@
       if (ev) {
         fillEventFormForEdit(ev);
         if (titleEl) titleEl.textContent = "Edit schedule";
-        if (delBtn) delBtn.classList.remove("cal-form-hidden");
+        if (delBtn && !ev.recurrence_id) delBtn.classList.remove("cal-form-hidden");
       } else {
         clearEventForm(false);
         if (dateIso) document.getElementById("ev-date").value = dateIso;
@@ -2655,7 +2753,52 @@
       document.getElementById("cal-modal").classList.remove("hidden");
     }
 
-    function setEventFormMode(editId) {
+    const DOW_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+    function formatRecurrenceSummary(rec) {
+      if (!rec) return "Part of a repeating series.";
+      if (rec.frequency === "daily") {
+        const n = rec.repeat_days || 1;
+        return "Repeating daily · every " + n + " day" + (n === 1 ? "" : "s");
+      }
+      if (rec.frequency === "weekly") {
+        const w = rec.repeat_weeks || 1;
+        const skipSet = {};
+        (rec.skip_days || []).forEach(function (d) { skipSet[d] = true; });
+        const active = [];
+        for (let d = 0; d < 7; d++) {
+          if (!skipSet[d]) active.push(DOW_LABELS[d]);
+        }
+        let s = "Repeating weekly · " + w + " week" + (w === 1 ? "" : "s");
+        if (active.length) s += " · " + active.join(", ");
+        return s;
+      }
+      return "Part of a repeating series.";
+    }
+
+    function setRecurrenceSeriesUi(ev) {
+      const rid = ev && ev.recurrence_id ? String(ev.recurrence_id) : "";
+      const panel = document.getElementById("ev-series-panel");
+      const summary = document.getElementById("ev-series-summary");
+      const ridField = document.getElementById("ev-recurrence-id");
+      const delSingle = document.getElementById("btn-ev-delete");
+      const delGroup = document.getElementById("ev-delete-group");
+      const scopeOcc = document.querySelector('input[name="ev-edit-scope"][value="occurrence"]');
+      if (ridField) ridField.value = rid;
+      if (scopeOcc) scopeOcc.checked = true;
+      if (rid) {
+        if (panel) panel.classList.remove("cal-form-hidden");
+        if (summary) summary.textContent = formatRecurrenceSummary(ev.recurrence);
+        if (delSingle) delSingle.classList.add("cal-form-hidden");
+        if (delGroup) delGroup.classList.remove("cal-form-hidden");
+      } else {
+        if (panel) panel.classList.add("cal-form-hidden");
+        if (summary) summary.textContent = "";
+        if (delGroup) delGroup.classList.add("cal-form-hidden");
+      }
+    }
+
+    function setEventFormMode(editId, ev) {
       const saveBtn = document.getElementById("btn-ev-save");
       const cancelBtn = document.getElementById("btn-ev-cancel-edit");
       const recurInner = document.getElementById("ev-recur-inner");
@@ -2665,12 +2808,16 @@
         saveBtn.textContent = "Update";
         cancelBtn.textContent = "Cancel";
         recurInner.classList.add("disabled");
-        document.getElementById("ev-recur-weekly").checked = false;
+        const noneType = document.querySelector('input[name="ev-recur-type"][value="none"]');
+        if (noneType) noneType.checked = true;
+        syncRecurPanels();
+        setRecurrenceSeriesUi(ev || null);
       } else {
         editField.value = "";
         saveBtn.textContent = "Save";
         cancelBtn.textContent = "Cancel";
         recurInner.classList.remove("disabled");
+        setRecurrenceSeriesUi(null);
       }
     }
 
@@ -2680,12 +2827,12 @@
       document.getElementById("ev-date").value = isoDateLocal(new Date());
       document.getElementById("ev-time-start").value = "09:00";
       document.getElementById("ev-time-end").value = "10:00";
-      document.getElementById("ev-recur-weekly").checked = false;
+      const noneType = document.querySelector('input[name="ev-recur-type"][value="none"]');
+      if (noneType) noneType.checked = true;
+      document.getElementById("ev-repeat-days").value = "7";
       document.getElementById("ev-repeat-weeks").value = "8";
-      const sameDay = document.querySelector('input[name="ev-weekly-mode"][value="same_day"]');
-      if (sameDay) sameDay.checked = true;
-      applySkipPreset("weekends");
-      syncRecurOptionsPanel();
+      setSkipDaysChecked([0, 1, 2, 3, 4, 5, 6]);
+      syncRecurPanels();
       setEventFormMode(null);
       if (closeModal !== false) closeCalModal();
     }
@@ -2698,7 +2845,12 @@
       document.getElementById("ev-date").value = st.date || en.date;
       document.getElementById("ev-time-start").value = st.time || "09:00";
       document.getElementById("ev-time-end").value = en.time || "10:00";
-      setEventFormMode(ev.id);
+      setEventFormMode(ev.id, ev);
+    }
+
+    function evEditScopeIsSeries() {
+      const picked = document.querySelector('input[name="ev-edit-scope"]:checked');
+      return picked && picked.value === "series";
     }
 
     function evSkipDaysSelected() {
@@ -2761,9 +2913,13 @@
       }
       try {
         if (editId) {
-          setEvApiLog("PATCH /api/calendar/events/" + editId + " …");
+          const updateSeries = evEditScopeIsSeries();
+          const q = updateSeries ? "?update_series=true" : "";
+          setEvApiLog(
+            "PATCH /api/calendar/events/" + editId + (updateSeries ? " (entire series) " : " ") + "…"
+          );
           const j = await fetchJson(
-            apiUrl("/api/calendar/events/" + encodeURIComponent(editId)),
+            apiUrl("/api/calendar/events/" + encodeURIComponent(editId) + q),
             {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
@@ -2776,7 +2932,16 @@
             },
             30000
           );
-          setEvApiLog("Updated · schedule_version " + (j.schedule_version != null ? j.schedule_version : "—"));
+          const n = j.updated != null ? j.updated : 1;
+          const scope = j.scope === "series" ? "series" : "occurrence";
+          setEvApiLog(
+            "Updated " +
+              n +
+              " (" +
+              scope +
+              ") · schedule_version " +
+              (j.schedule_version != null ? j.schedule_version : "—")
+          );
           clearEventForm();
         } else {
           const body = {
@@ -2785,12 +2950,7 @@
             start: times.start,
             end: times.end,
             kind: "personal",
-            recurrence: {
-              enabled: document.getElementById("ev-recur-weekly").checked,
-              weekly_mode: evWeeklyModeValue(),
-              skip_days: evSkipDaysSelected(),
-              repeat_weeks: parseInt(document.getElementById("ev-repeat-weeks").value, 10) || 8,
-            },
+            recurrence: evRecurrencePayload(),
           };
           setEvApiLog("POST /api/calendar/events …");
           const j = await fetchJson(
@@ -2826,7 +2986,8 @@
           { method: "DELETE" },
           30000
         );
-        setEvApiLog("Deleted " + (j.deleted || 0) + " row(s)");
+        const scope = j.scope === "series" ? "entire series" : "this occurrence";
+        setEvApiLog("Deleted " + (j.deleted || 0) + " (" + scope + ")");
         closeCalModal();
         clearEventForm(false);
         await loadCalAgenda();
@@ -2926,6 +3087,16 @@
       return title + " — " + done + "/" + total + " done (" + pct + "%) · " + st;
     }
 
+    function updateGoalDebugLink() {
+      const href = goalPlanId
+        ? "/goal-debug?plan_id=" + encodeURIComponent(goalPlanId)
+        : "/goal-debug";
+      ["btn-goal-traces", "btn-goal-traces-bar"].forEach(function (id) {
+        const a = document.getElementById(id);
+        if (a) a.href = href;
+      });
+    }
+
     function syncGoalSubChrome() {
       document.querySelectorAll(".goal-sub-btn").forEach(function (btn) {
         const on = btn.getAttribute("data-goal-sub") === goalSubMode;
@@ -2992,6 +3163,7 @@
         if (goalPlanId) sessionStorage.setItem(goalPlanKey(), goalPlanId);
         else sessionStorage.removeItem(goalPlanKey());
       } catch (e) { /* ignore */ }
+      updateGoalDebugLink();
     }
 
     function setGoalSubMode(sub) {
@@ -3300,6 +3472,21 @@
       const editId = (document.getElementById("ev-edit-id").value || "").trim();
       if (editId && confirm("Delete this schedule event?")) {
         deleteCalendarEvent(editId, false);
+      }
+    });
+    document.getElementById("btn-ev-delete-one").addEventListener("click", function () {
+      const editId = (document.getElementById("ev-edit-id").value || "").trim();
+      if (editId && confirm("Delete only this occurrence? Other events in the series stay.")) {
+        deleteCalendarEvent(editId, false);
+      }
+    });
+    document.getElementById("btn-ev-delete-series").addEventListener("click", function () {
+      const editId = (document.getElementById("ev-edit-id").value || "").trim();
+      if (
+        editId &&
+        confirm("Delete the entire repeating series? All occurrences will be removed.")
+      ) {
+        deleteCalendarEvent(editId, true);
       }
     });
     document.getElementById("btn-gt-save").addEventListener("click", function () {

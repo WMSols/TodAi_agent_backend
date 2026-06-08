@@ -205,6 +205,8 @@ class CalendarEventUpdateResponse(BaseModel):
 
     ok: bool = True
     event: CalendarEventOut
+    updated: int = 1
+    scope: str = Field("occurrence", description="occurrence | series")
     schedule_version: int
 
 
@@ -212,6 +214,7 @@ class CalendarEventDeleteResponse(BaseModel):
     """DELETE /api/calendar/events/{event_id}."""
 
     ok: bool = True
+    scope: str = Field("occurrence", description="occurrence | series")
     deleted: int = Field(..., description="Number of rows removed (1 or whole series count)")
     schedule_version: int
 

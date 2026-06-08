@@ -11,10 +11,11 @@ from todai.agent.planner.groq_config import GROQ_API_KEY
 from todai.agent.core.groq_errors import is_groq_failure_reply
 from todai.agent.planner.llm import groq_chat_json
 from todai.goal_planner.display import build_goal_plan_schedule_display
-from todai.goal_planner.interrogation import parse_confirmation
 from todai.goal_planner.routing import groq_goal_manage_context
 from todai.goal_planner.session_store import GoalPlanSessionStore
 from todai.goal_planner.task_manage_query import DeleteManageIntent, parse_delete_manage_intent
+from todai.goal_planner.task_query import _DELETE_VERB
+from todai.goal_planner.turn_normalize import normalize_confirmation
 from todai.goal_planner.tools import (
     execute_delete_all_goals,
     execute_delete_goal,
@@ -30,9 +31,19 @@ _DELETE_ALL_PATTERNS = re.compile(
 _MANAGE_SYSTEM = (
     "TodAI goal manage specialist. You receive TOOL_RESULTS JSON. "
     "Write a short, clear replyText in JSON: {\"replyText\": string}. "
-    "Summarize goals, week plans, and progress (done/pending/total). "
-    "If delete was requested but needs confirmation, say so. No markdown code fences."
+    "Summarize goals, week plans, and progress (done/pending/total) from TOOL_RESULTS only. "
+    "Never mention delete or ask for confirmation unless user_message explicitly requests deletion. "
+    "No markdown code fences."
 )
+
+
+def _is_list_only_manage_turn(message: str, manage_action: str, pending: dict[str, Any]) -> bool:
+    """List/review all goals — skip yes/no and delete-intent Groq when not deleting."""
+    if pending:
+        return False
+    if manage_action != "list":
+        return False
+    return not re.search(r"\b(delete|remove|clear|drop)\b", message, re.I)
 
 
 def _plan_window(
@@ -54,8 +65,11 @@ def _schedule_patch(
     start = date.fromisoformat(str(plan_row["start_date"])[:10])
     end = date.fromisoformat(str(plan_row["end_date"])[:10])
     tasks = store.list_goal_tasks(plan_id)
+    objective = str(plan_row.get("plan_notes") or "").strip()
     return {
-        "schedule_display": build_goal_plan_schedule_display(tasks, start=start, end=end),
+        "schedule_display": build_goal_plan_schedule_display(
+            tasks, start=start, end=end, goal_objective=objective
+        ),
     }
 
 
@@ -77,21 +91,36 @@ def _format_delete_day_confirm(intent: DeleteManageIntent) -> str:
 
 
 def _format_delete_task_confirm(intent: DeleteManageIntent) -> str:
-    t = intent.tasks[0]
-    title = (t.get("title") or "Task").strip()
-    d = str(t.get("task_date", ""))[:10]
-    lines = [
-        f"This will **remove one task**: **{title}**",
-    ]
-    if d:
-        lines.append(f"Scheduled: **{d}**")
-    lines.extend(
-        [
-            "",
-            "Reply **yes** to confirm or **no** to cancel.",
-        ]
-    )
+    tasks = list(intent.tasks)
+    if len(tasks) == 1:
+        t = tasks[0]
+        title = (t.get("title") or "Task").strip()
+        d = str(t.get("task_date", ""))[:10]
+        lines = [f"This will **remove one task**: **{title}**"]
+        if d:
+            lines.append(f"Scheduled: **{d}**")
+    else:
+        header = f"This will **remove {len(tasks)} task(s)**"
+        if intent.day_label:
+            header += f" on **{intent.day_label}**"
+        header += ":"
+        lines = [header, ""]
+        for t in tasks:
+            lines.append(f"  • {(t.get('title') or 'Task').strip()}")
+        lines.append("")
+        lines.append("Your goal and tasks on other days are **not** affected.")
+    lines.extend(["", "Reply **yes** to confirm or **no** to cancel."])
     return "\n".join(lines)
+
+
+def _confirm_context(pending: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "prompt_type": "delete_confirm",
+        "pending_kind": pending.get("kind"),
+        "day_label": pending.get("day_label"),
+        "task_title": pending.get("task_title"),
+        "task_count": len(pending.get("task_ids") or []),
+    }
 
 
 def _pending_from_intent(intent: DeleteManageIntent, plan_id: str) -> dict[str, Any]:
@@ -108,7 +137,10 @@ def _pending_from_intent(intent: DeleteManageIntent, plan_id: str) -> dict[str, 
             "day_label": intent.day_label,
         }
     if intent.action == "delete_task":
-        title = (intent.tasks[0].get("title") or "Task").strip() if intent.tasks else ""
+        if len(intent.tasks) == 1:
+            title = (intent.tasks[0].get("title") or "Task").strip()
+        else:
+            title = f"{len(intent.tasks)} tasks"
         return {**base, "kind": "delete_task", "task_title": title}
     return base
 
@@ -131,8 +163,15 @@ def _start_delete_flow(
             trace,
         )
     if intent.action == "delete_task" and intent.tasks:
-        session["pending_manage"] = _pending_from_intent(intent, plan_id)
-        trace.append({"phase": "pending_delete_task", "task_id": intent.tasks[0].get("id")})
+        pending = _pending_from_intent(intent, plan_id)
+        session["pending_manage"] = pending
+        trace.append(
+            {
+                "phase": "pending_delete_task",
+                "count": len(intent.tasks),
+                "task_ids": pending.get("task_ids"),
+            }
+        )
         return (
             _format_delete_task_confirm(intent),
             {"pending_manage": session["pending_manage"]},
@@ -150,6 +189,7 @@ def handle_goal_manage(
     session: dict[str, Any],
     history: list[dict[str, Any]] | None = None,
     router_tools: list[dict[str, Any]] | None = None,
+    allow_groq: bool = True,
 ) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
     tool_names = [t.get("tool") for t in (router_tools or []) if t.get("tool")]
     trace: list[dict[str, Any]] = [
@@ -157,7 +197,31 @@ def handle_goal_manage(
     ]
     pending = session.get("pending_manage") or {}
 
-    if pending.get("kind") == "delete_all" and parse_confirmation(message) == "yes":
+    if _is_list_only_manage_turn(message, manage_action, pending):
+        trace.append({"phase": "confirm_normalize", "skipped": True, "reason": "list_only"})
+        trace.append({"phase": "delete_intent", "skipped": True, "reason": "list_only"})
+        return _handle_manage_list(
+            store, plan_id, message, history=history, trace=trace
+        )
+
+    choice = "unclear"
+    if pending:
+        confirm_ctx = _confirm_context(pending)
+        choice = normalize_confirmation(
+            message, context=confirm_ctx, allow_groq=allow_groq
+        ).choice
+        trace.append({"phase": "confirm_normalize", "choice": choice, "pending": True})
+    elif _DELETE_VERB.search(message or ""):
+        trace.append(
+            {"phase": "confirm_normalize", "skipped": True, "reason": "new_delete_request"}
+        )
+    else:
+        choice = normalize_confirmation(
+            message, context={"prompt_type": "manage"}, allow_groq=allow_groq
+        ).choice
+        trace.append({"phase": "confirm_normalize", "choice": choice, "pending": False})
+
+    if pending.get("kind") == "delete_all" and choice == "yes":
         result = execute_delete_all_goals(store)
         session.pop("pending_manage", None)
         reply = (
@@ -168,7 +232,7 @@ def handle_goal_manage(
         trace.append({"phase": "goal_tool", "tool": "delete_all_goals", "result": result})
         return reply, {"phase": "interrogate", "answers": {}, "pending_manage": None}, trace
 
-    if pending.get("kind") == "delete_goal" and parse_confirmation(message) == "yes":
+    if pending.get("kind") == "delete_goal" and choice == "yes":
         result = execute_delete_goal(store, plan_id)
         session.pop("pending_manage", None)
         reply = (
@@ -184,7 +248,7 @@ def handle_goal_manage(
             trace,
         )
 
-    if pending.get("kind") == "delete_plan" and parse_confirmation(message) == "yes":
+    if pending.get("kind") == "delete_plan" and choice == "yes":
         result = execute_delete_plan(store, plan_id)
         session.pop("pending_manage", None)
         reply = (
@@ -194,7 +258,7 @@ def handle_goal_manage(
         trace.append({"phase": "goal_tool", "tool": "delete_plan", "result": result})
         return reply, {"phase": "interrogate", "answers": {}, "pending_manage": None}, trace
 
-    if pending.get("kind") == "delete_day" and parse_confirmation(message) == "yes":
+    if pending.get("kind") == "delete_day" and choice == "yes":
         ids = list(pending.get("task_ids") or [])
         result = store.delete_goal_tasks_by_ids(ids, plan_id=plan_id)
         session.pop("pending_manage", None)
@@ -204,23 +268,35 @@ def handle_goal_manage(
         patch = {"pending_manage": None, **_schedule_patch(store, plan_id)}
         return reply, patch, trace
 
-    if pending.get("kind") == "delete_task" and parse_confirmation(message) == "yes":
+    if pending.get("kind") == "delete_task" and choice == "yes":
         ids = list(pending.get("task_ids") or [])
         result = store.delete_goal_tasks_by_ids(ids, plan_id=plan_id)
         session.pop("pending_manage", None)
+        n = int(result.get("count") or len(ids) or 0)
         title = pending.get("task_title") or "task"
-        reply = f"Removed task **{title}**."
+        reply = (
+            f"Removed **{n}** task(s): **{title}**."
+            if n != 1
+            else f"Removed task **{title}**."
+        )
         trace.append({"phase": "goal_tool", "tool": "delete_task", "result": result})
         patch = {"pending_manage": None, **_schedule_patch(store, plan_id)}
         return reply, patch, trace
 
-    if pending and parse_confirmation(message) == "no":
+    if pending and choice == "no":
         session.pop("pending_manage", None)
         return "Cancelled — no changes made.", {"pending_manage": None}, trace
 
+    if pending and choice == "unclear":
+        return (
+            "I'm not sure yet — reply **yes** to confirm the change or **no** to cancel.",
+            {},
+            trace,
+        )
+
     start, end, all_tasks = _plan_window(store, plan_id)
     delete_intent = parse_delete_manage_intent(
-        message, start=start, end=end, all_tasks=all_tasks
+        message, start=start, end=end, all_tasks=all_tasks, allow_groq=allow_groq
     )
     trace.append(
         {
@@ -337,7 +413,21 @@ def handle_goal_manage(
             trace,
         )
 
-    # Default: list / review with full progress
+    return _handle_manage_list(
+        store, plan_id, message, history=history, trace=trace, allow_groq=allow_groq
+    )
+
+
+def _handle_manage_list(
+    store: GoalPlanSessionStore,
+    plan_id: str,
+    message: str,
+    *,
+    history: list[dict[str, Any]] | None = None,
+    trace: list[dict[str, Any]],
+    allow_groq: bool = True,
+) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
+    """List all goals with progress — deterministic reply; Groq optional polish only."""
     data = execute_list_goals_with_progress(store, current_plan_id=plan_id)
     trace.append({"phase": "goal_tool", "tool": "list_goals_with_progress"})
 
@@ -347,11 +437,20 @@ def handle_goal_manage(
         start = date.fromisoformat(str(plan_row["start_date"])[:10])
         end = date.fromisoformat(str(plan_row["end_date"])[:10])
         tasks = store.list_goal_tasks(plan_id)
-        display = build_goal_plan_schedule_display(tasks, start=start, end=end)
+        objective = str(plan_row.get("plan_notes") or "").strip()
+        display = build_goal_plan_schedule_display(
+            tasks, start=start, end=end, goal_objective=objective
+        )
         patch["schedule_display"] = display
 
     reply = _format_list_reply(data, plan_id=plan_id)
-    if GROQ_API_KEY and data.get("plans"):
+    # Keep list replies grounded in TOOL_RESULTS — Groq was inventing delete prompts.
+    if (
+        allow_groq
+        and GROQ_API_KEY
+        and data.get("plans")
+        and re.search(r"\b(summarize|summary|overview|explain)\b", message, re.I)
+    ):
         groq_reply = _groq_manage_reply(message, history, data)
         if groq_reply:
             reply = groq_reply

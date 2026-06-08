@@ -29,7 +29,7 @@ QUESTIONS: dict[StepId, str] = {
     "skip_days": (
         "**Question 3 of 3 — Skip days**\n"
         "Which weekdays should have **no tasks**? "
-        "Name them (e.g. **Saturday and Sunday**) or say **none** for every day."
+        "Name one or more (e.g. **Monday** or **Saturday and Sunday**) or say **none** for every day."
     ),
     "difficulty": (
         "How hard should this feel? Reply with exactly one word: **easy**, **medium**, or **hard**."
@@ -177,6 +177,12 @@ def parse_skip_days(raw: str) -> ParseResult:
         lower,
     ):
         return ParseResult(valid=True, parsed=[], display="No skip days (tasks every day)")
+    if re.search(r"\bno\s+any\s+days?\b", lower):
+        return ParseResult(valid=True, parsed=[], display="No skip days (tasks every day)")
+    if re.search(r"\bnot\s+any\s+day(?:s)?(?:\s+to\s+skip)?\b", lower):
+        return ParseResult(valid=True, parsed=[], display="No skip days (tasks every day)")
+    if re.search(r"\bno\s+days?\s+to\s+skip\b", lower):
+        return ParseResult(valid=True, parsed=[], display="No skip days (tasks every day)")
     if re.search(r"\bweekends?\b", lower):
         return ParseResult(valid=True, parsed=[5, 6], display="Skip Saturday & Sunday")
     if re.search(r"\bweekdays?\b", lower) and "weekend" not in lower:
@@ -280,21 +286,19 @@ def _parse_difficulty(raw: str) -> ParseResult:
 
 def _parse_tasks_per_day(raw: str) -> ParseResult:
     lower = raw.lower()
-    _WORD_NUMBERS = {
-        "one": 1,
-        "two": 2,
-        "three": 3,
-        "four": 4,
-        "five": 5,
-        "a": 1,
-        "an": 1,
-    }
-    for word, n in _WORD_NUMBERS.items():
-        if re.search(rf"\b{re.escape(word)}\b", lower):
+    m = re.search(r"\b(\d+)\s*tasks?\b", lower)
+    if m:
+        n = int(m.group(1))
+        if 1 <= n <= 5:
             return ParseResult(valid=True, parsed=n)
+        return ParseResult(valid=False, hint="Choose between **1 and 5** tasks per day.")
     m = re.search(r"\b([1-5])\b", raw)
     if m:
         return ParseResult(valid=True, parsed=int(m.group(1)))
+    _WORD_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
+    for word, n in _WORD_NUMBERS.items():
+        if re.search(rf"\b{re.escape(word)}\b", lower):
+            return ParseResult(valid=True, parsed=n)
     m2 = re.search(r"\b(\d+)\b", raw)
     if m2:
         n = int(m2.group(1))
@@ -305,6 +309,31 @@ def _parse_tasks_per_day(raw: str) -> ParseResult:
         valid=False,
         hint="Send a whole number from **1 to 5** (example: 2 or *two tasks*).",
     )
+
+
+_GOAL_CANCEL_RE = re.compile(
+    r"\b(?:delete|remove|discard|drop|cancel|abort)\b.*\b(?:goal|plan|this|everything)\b|"
+    r"\b(?:goal|plan)\b.*\b(?:delete|remove|discard|drop|cancel|abort)\b",
+    re.I,
+)
+
+_OBJECTIVE_EDIT_RE = re.compile(
+    r"(?:change|update|set|make|edit)\s+(?:the\s+)?(?:objective|goal(?:\s+description)?|description)"
+    r"\s+(?:to\s+)?(.+)",
+    re.I,
+)
+
+
+def is_goal_cancel_message(text: str) -> bool:
+    return bool(_GOAL_CANCEL_RE.search((text or "").strip()))
+
+
+def extract_objective_edit_text(text: str) -> str:
+    raw = (text or "").strip()
+    m = _OBJECTIVE_EDIT_RE.search(raw)
+    if m:
+        return m.group(1).strip().rstrip(".")
+    return raw
 
 
 def _parse_minutes_per_day(raw: str) -> ParseResult:
@@ -402,7 +431,8 @@ def confirmation_prompt(answers: dict[str, Any], *, goal_title: str = "") -> str
         f"2. Tasks per active day: {_answer_label(answers, 'tasks_per_day')}\n"
         f"3. Skip days: {skip_label}\n\n"
         "Reply **yes** to create tasks in your calendar.\n"
-        "To change something, say e.g. **2 tasks per day** or **skip Monday and Sunday**."
+        "To change settings, describe what you want in plain language — you can update "
+        "several at once (e.g. **3 tasks per day, skip weekends, focus on sprint control**)."
     )
 
 
@@ -417,6 +447,7 @@ def is_active_acknowledgment(text: str) -> bool:
 
 
 def parse_confirmation(text: str) -> Literal["yes", "no", "unclear"]:
+    """Offline fallback for yes/no; prefer normalize_confirmation() for user turns."""
     t = (text or "").strip().lower()
     if t in ("yes", "y", "ok", "okay", "sure", "go", "create", "generate", "do it", "confirm"):
         return "yes"
@@ -425,6 +456,8 @@ def parse_confirmation(text: str) -> Literal["yes", "no", "unclear"]:
     if t in ("no", "n", "wait", "stop", "cancel"):
         return "no"
     if re.search(r"\b(yes|yeah|yep|go ahead|looks good)\b", t):
+        return "yes"
+    if re.search(r"\b(do\s+it|go\s+ahead|sure\s+do|please\s+do)\b", t):
         return "yes"
     return "unclear"
 
@@ -443,31 +476,50 @@ def try_apply_confirm_edits(
     if not text:
         return answers, None
 
+    if is_goal_cancel_message(text):
+        return answers, None
+
     acks: list[str] = []
     lower = text.lower()
 
     if re.search(r"\b(skip|skipping|weekend|weekday)\b", lower) or any(
         re.search(rf"\b{re.escape(name)}\b", lower) for name in _WEEKDAY_PARSE
     ):
-        r = parse_skip_days(text)
+        # Additive skip edits need Groq merge — static parse would drop existing days.
+        if not re.search(r"\b(add|also|as well|in addition|include)\b", lower):
+            r = parse_skip_days(text)
+            if r.valid:
+                answers["skip_days"] = {
+                    "valid": True,
+                    "parsed": r.parsed,
+                    "raw": text,
+                    "display": r.display or format_skip_days(r.parsed if isinstance(r.parsed, list) else []),
+                }
+                acks.append(f"skip days → {answers['skip_days']['display']}")
+
+    obj_text = extract_objective_edit_text(text)
+    if re.search(r"\b(objective|description)\b", lower) and re.search(
+        r"\b(?:change|update|set|make|edit)\b", lower
+    ):
+        r = parse_answer("objective", obj_text, default_objective=default_objective)
         if r.valid:
-            answers["skip_days"] = {
+            answers["objective"] = {
                 "valid": True,
                 "parsed": r.parsed,
                 "raw": text,
-                "display": r.display or format_skip_days(r.parsed if isinstance(r.parsed, list) else []),
+                "display": r.display or str(r.parsed)[:80],
             }
-            acks.append(f"skip days → {answers['skip_days']['display']}")
-
-    if re.search(r"\b(objective|goal)\b", lower) or (
+            acks.append(f"objective → {answers['objective']['display']}")
+    elif re.search(r"\b(objective|goal)\b", lower) or (
         len(text) > 12
         and "task" not in lower
         and "skip" not in lower
         and not any(re.search(rf"\b{re.escape(name)}\b", lower) for name in _WEEKDAY_PARSE)
         and "minute" not in lower
         and "difficult" not in lower
+        and not is_goal_cancel_message(text)
     ):
-        r = parse_answer("objective", text, default_objective=default_objective)
+        r = parse_answer("objective", obj_text, default_objective=default_objective)
         if r.valid:
             answers["objective"] = {
                 "valid": True,
@@ -517,14 +569,23 @@ def try_apply_confirm_edits(
     return answers, "; ".join(acks)
 
 
+_CONFIRM_EDIT_HINT = re.compile(
+    r"\b(?:task|tasks|skip|objective|goal|difficult|easier|harder|intensity|"
+    r"minute|mins?|hour|weekend|weekday|change|instead|actually|make it|"
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+    r"mon|tue|wed|thu|fri|sat|sun)\b",
+    re.I,
+)
+
+
 def is_confirm_settings_edit(message: str, *, default_objective: str = "") -> bool:
-    """True when confirm-phase message adjusts plan settings (not yes/no/delete)."""
+    """True when confirm-phase message likely adjusts plan settings (not yes/no/delete)."""
     if parse_confirmation(message) in ("yes", "no"):
         return False
     lower = (message or "").strip().lower()
-    if re.search(
-        r"\b(delete|remove|clear|drop|cancel)\b.*\b(goal|plan|tasks?)\b|"
-        r"\b(goal|plan|tasks?)\b.*\b(delete|remove|clear|drop)\b",
+    if is_goal_cancel_message(message) or re.search(
+        r"\b(delete|remove|clear|drop|cancel)\b.*\b(tasks?)\b|"
+        r"\b(tasks?)\b.*\b(delete|remove|clear|drop)\b",
         lower,
     ):
         return False
@@ -533,4 +594,6 @@ def is_confirm_settings_edit(message: str, *, default_objective: str = "") -> bo
         {},
         default_objective=default_objective or "7-day goal target",
     )
-    return ack is not None
+    if ack is not None:
+        return True
+    return bool(_CONFIRM_EDIT_HINT.search(lower))

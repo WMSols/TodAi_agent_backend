@@ -1,0 +1,34 @@
+# Render Blueprint — Web Service (no Docker).
+# Dashboard: New → Blueprint → connect repo, or create Web Service manually with the same settings.
+#
+# Set secret env vars in the Render dashboard (never commit real values).
+
+services:
+  - type: web
+    name: todai-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn todai.api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.3"
+      - key: AUTH_DEV_ALLOW_DEFAULT
+        value: "false"
+      - key: TODAI_LOG_LEVEL
+        value: info
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: LOCAL_AUTH_SECRET
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false

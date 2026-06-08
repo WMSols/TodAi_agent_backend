@@ -32,9 +32,13 @@ router = APIRouter(prefix="/api/calendar", tags=["calendar"])
 
 class RecurrenceInput(BaseModel):
     enabled: bool = False
-    weekly_mode: str = Field("same_day", description="same_day | weekdays")
-    skip_days: list[int] = Field(default_factory=list, description="0=Mon .. 6=Sun to skip")
-    repeat_weeks: int = Field(12, ge=1, le=52)
+    frequency: str = Field("weekly", description="daily | weekly")
+    repeat_days: int = Field(7, ge=1, le=365, description="Daily only: total days including first")
+    repeat_weeks: int = Field(8, ge=1, le=52, description="Weekly only: number of weeks")
+    skip_days: list[int] = Field(
+        default_factory=list,
+        description="Weekly only: weekdays to skip (0=Mon .. 6=Sun)",
+    )
 
 
 class CalendarEventCreate(BaseModel):
@@ -161,14 +165,26 @@ async def api_create_event(
 async def api_update_event(
     body: CalendarEventUpdate,
     event_id: str = Path(..., description="Event UUID from agenda or GET /events"),
+    update_series: bool = Query(
+        False,
+        description="true = apply changes to all events sharing recurrence_id",
+    ),
     user_id: str = Depends(_user_id),
 ) -> CalendarEventUpdateResponse:
     try:
         patch = body.model_dump(exclude_unset=True)
-        result = await asyncio.to_thread(cal_svc.update_event, user_id, event_id, patch)
+        result = await asyncio.to_thread(
+            cal_svc.update_event,
+            user_id,
+            event_id,
+            patch,
+            update_series=update_series,
+        )
         return CalendarEventUpdateResponse.model_validate(result)
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception:
         logger.exception("calendar update failed user=%s event=%s", user_id, event_id)
         raise

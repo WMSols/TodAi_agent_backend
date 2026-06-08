@@ -209,6 +209,9 @@ import re
 
 _TASK_SUMMARY_PATTERNS = re.compile(
     r"\b(what\b.*\b(tasks?|todos?)\b|"
+    r"\bwhat\b.*\bprogress\b|"
+    r"\bprogress\b.*\b(?:for|on|of|with)\b.*\b(?:this|my|the|current)?\s*(?:goal|plan)\b|"
+    r"\b(?:this|my|the|current)\s+(?:goal|plan)\b.*\bprogress\b|"
     r"\b(tasks?|todos?)\b.*\b(for|on|in)\b.*\b(this|my|the)?\s*(goal|plan)\b|"
     r"\b(show|list|view|give)\b.*\b(my\s+)?(tasks?|plan)\b|"
     r"\b(my\s+)?(tasks?|daily\s+tasks?)\b.*\b(summary|overview|list)\b|"
@@ -216,13 +219,24 @@ _TASK_SUMMARY_PATTERNS = re.compile(
     r"\bshow\s+my\s+plan\b)",
     re.I,
 )
+_PROGRESS_QUERY = re.compile(
+    r"\b(progress|how\s+(?:much|many)\s+(?:done|completed)|percent(?:age)?|done\s+so\s+far)\b",
+    re.I,
+)
+_ALL_GOALS_PROGRESS = re.compile(r"\b(?:all|every)\s+(?:my\s+)?goals?\b", re.I)
 _SCHEDULE_PATTERNS = re.compile(
     r"\b(free time|free slot|calendar|schedule|what.?s on|busy|available|"
     r"my schedule|view my calendar|this week|tomorrow)\b",
     re.I,
 )
 _GOALS_LIST_PATTERNS = re.compile(
-    r"\b(review goals?|my goals?|list goals?|show goals?|view goals?|all goals?|progress)\b",
+    r"\b(review goals?|my goals?|list goals?|show goals?|view goals?|all goals?)\b",
+    re.I,
+)
+_DAY_SCOPED_TASK_OR_GOAL = re.compile(
+    r"\b(?:goals?|tasks?)\b.*\b(?:for\s+)?(?:this\s+)?(?:day|today)\b|"
+    r"\b(?:for\s+)?(?:this\s+)?(?:day|today)\b.*\b(?:goals?|tasks?)\b|"
+    r"\bwhat\b.*\b(?:are|is)\b.*\b(?:my\s+)?(?:goals?|tasks?)\b.*\b(?:for\s+)?(?:this\s+)?(?:day|today)\b",
     re.I,
 )
 _DELETE_PATTERNS = re.compile(
@@ -239,8 +253,10 @@ _DELETE_ALL_GOALS_PHRASE = re.compile(
     r"\b(?:my\s+)?goals\b.*\b(delete|remove|clear|drop)\b",
     re.I,
 )
+# Plan edits on active plans only — NOT intake answers like "days to skip" (bare "skip" removed).
 _EDIT_PATTERNS = re.compile(
-    r"\b(move|reschedule|edit task|skip|swap|easier|harder|mark done|complete task)\b",
+    r"\b(move|reschedule|edit task|swap|easier|harder|mark done|complete task)\b|"
+    r"\bskip\s+(?:a\s+)?task\b",
     re.I,
 )
 _CREATE_PATTERNS = re.compile(
@@ -282,6 +298,15 @@ _GUIDANCE_PATTERNS = re.compile(
     r"walk\s+me\s+through|tips?\s+(?:for|on)|what\s+should\s+i)\b",
     re.I,
 )
+_GOAL_COACH_PATTERNS = re.compile(
+    r"\b(?:difficult|hardest|challenging|toughest|harder|easy\s+day|easiest)\b.*\b(?:day|tasks?)\b|"
+    r"\b(?:day|tasks?)\b.*\b(?:difficult|hardest|challenging|toughest|harder)\b|"
+    r"\b(?:should\s+i|what\s+do\s+you\s+think|do\s+you\s+think|recommend|suggest)\b|"
+    r"\b(?:on\s+track|am\s+i\s+doing|focus\s+on|priorit(?:y|ize)|busiest|lightest)\b|"
+    r"\b(?:why\s+no\s+tasks?|empty\s+day|skip\s+day)\b|"
+    r"\b(?:advice|guidance|coach|motivat)\b",
+    re.I,
+)
 _DELETE_FULL_PLAN_PHRASE = re.compile(
     r"\b(delete|remove|cancel|clear|drop)\b.*\b(plan|program|programme)\b|"
     r"\b(delete|remove)\b.*\b(weight\s*loss|fitness|workout)\b",
@@ -319,16 +344,17 @@ def match_operational_intent(message: str) -> GoalRouterModel | None:
         return None
     if is_today_question(text):
         return GoalRouterModel(route="goal_chat", manage_action="none", tools=[])
+    if _DAY_SCOPED_TASK_OR_GOAL.search(text):
+        return GoalRouterModel(route="goal_tasks_summary", manage_action="none", tools=[])
     if _DELETE_ALL_PATTERNS.search(text) or _DELETE_ALL_GOALS_PHRASE.search(text):
         return GoalRouterModel(
             route="goal_manage",
             manage_action="delete_all",
             tools=[{"tool": "delete_all_goals"}],
         )
-    if _GUIDANCE_PATTERNS.search(text) and not re.search(
-        r"\b(delete|remove|clear|drop)\b", text, re.I
-    ):
-        return GoalRouterModel(route="goal_tasks_summary", manage_action="none", tools=[])
+    coach = match_goal_coach_intent(text)
+    if coach:
+        return coach
     if _DELETE_DAY_PATTERNS.search(text):
         return GoalRouterModel(route="goal_manage", manage_action="delete_day", tools=[])
     if _DELETE_TASK_SPECIFIC.search(text):
@@ -357,7 +383,9 @@ def match_operational_intent(message: str) -> GoalRouterModel | None:
         )
     if _TASK_SUMMARY_PATTERNS.search(text):
         return GoalRouterModel(route="goal_tasks_summary", manage_action="none", tools=[])
-    if _WHAT_GOALS_PATTERNS.search(text) or _GOALS_LIST_PATTERNS.search(text):
+    if _PROGRESS_QUERY.search(text) and not _ALL_GOALS_PROGRESS.search(text):
+        return GoalRouterModel(route="goal_tasks_summary", manage_action="none", tools=[])
+    if _is_all_goals_list_query(text):
         return GoalRouterModel(
             route="goal_manage",
             manage_action="list",
@@ -374,12 +402,63 @@ def match_operational_intent(message: str) -> GoalRouterModel | None:
     return None
 
 
+def match_intake_escape_intent(message: str) -> GoalRouterModel | None:
+    """Explicit delete/cancel only — allowed to break incomplete intake."""
+    text = (message or "").strip()
+    if not text:
+        return None
+    if _DELETE_ALL_PATTERNS.search(text) or _DELETE_ALL_GOALS_PHRASE.search(text):
+        return GoalRouterModel(
+            route="goal_manage",
+            manage_action="delete_all",
+            tools=[{"tool": "delete_all_goals"}],
+        )
+    if _DELETE_PLAN_ONLY_PATTERNS.search(text) and not _DELETE_DAY_PATTERNS.search(text):
+        return GoalRouterModel(
+            route="goal_manage",
+            manage_action="delete_plan",
+            tools=[{"tool": "delete_plan"}],
+        )
+    if (
+        _DELETE_GOAL_PATTERNS.search(text)
+        or _DELETE_FULL_PLAN_PHRASE.search(text)
+        or _DELETE_SHORT_PATTERNS.search(text)
+    ):
+        return GoalRouterModel(
+            route="goal_manage",
+            manage_action="delete_goal",
+            tools=[{"tool": "delete_goal"}],
+        )
+    return None
+
+
 def match_goal_manage_intent(message: str) -> GoalRouterModel | None:
     """Delete/list/manage intents that must work during intake and confirm (not only active)."""
+    escape = match_intake_escape_intent(message)
+    if escape:
+        return escape
     op = match_operational_intent(message)
     if op and op.route == "goal_manage":
         return op
     return None
+
+
+def match_goal_coach_intent(message: str) -> GoalRouterModel | None:
+    """Coaching / analytical questions → grounded goal_chat (not explicit task list)."""
+    text = (message or "").strip()
+    if not text:
+        return None
+    if re.search(r"\b(delete|remove|clear|drop)\b", text, re.I):
+        return None
+    is_coach = bool(_GOAL_COACH_PATTERNS.search(text)) or (
+        _GUIDANCE_PATTERNS.search(text)
+        and not re.search(r"\b(delete|remove|clear|drop)\b", text, re.I)
+    )
+    if not is_coach:
+        return None
+    if _TASK_SUMMARY_PATTERNS.search(text) and not _GOAL_COACH_PATTERNS.search(text):
+        return None
+    return GoalRouterModel(route="goal_chat", manage_action="none", tools=[])
 
 
 def route_goal_turn_rules(
@@ -399,13 +478,9 @@ def route_goal_turn_rules(
             return GoalRouterModel(route="goal_manage", manage_action="delete_all", tools=[{"tool": "delete_all_goals"}])
         if _TASK_SUMMARY_PATTERNS.search(text):
             return GoalRouterModel(route="goal_tasks_summary", manage_action="none", tools=[])
-        if _GOALS_LIST_PATTERNS.search(text):
-            return GoalRouterModel(
-                route="goal_manage",
-                manage_action="list",
-                tools=[{"tool": "list_goals_with_progress"}],
-            )
-        if _WHAT_GOALS_PATTERNS.search(text):
+        if _PROGRESS_QUERY.search(text) and not _ALL_GOALS_PROGRESS.search(text):
+            return GoalRouterModel(route="goal_tasks_summary", manage_action="none", tools=[])
+        if _is_all_goals_list_query(text):
             return GoalRouterModel(
                 route="goal_manage",
                 manage_action="list",
@@ -433,23 +508,9 @@ def route_goal_turn_rules(
     if phase in ("interrogate", "intake", "clarify", ""):
         if complete and re.search(r"\b(yes|create|generate)\b", text, re.I):
             return GoalRouterModel(route="goal_create", manage_action="none", tools=[])
-        if _SCHEDULE_PATTERNS.search(text) and not complete:
-            return GoalRouterModel(
-                route="goal_schedule_read",
-                manage_action="none",
-                tools=[{"tool": "get_free_time"}],
-            )
-        op = match_operational_intent(text)
-        if op:
-            return op
-        if _DELETE_PATTERNS.search(text):
-            return GoalRouterModel(
-                route="goal_manage",
-                manage_action="delete_goal",
-                tools=[{"tool": "delete_goal"}],
-            )
-        if _EDIT_PATTERNS.search(text):
-            return GoalRouterModel(route="goal_manage", manage_action="edit", tools=[])
+        escape = match_intake_escape_intent(text)
+        if escape:
+            return escape
         return GoalRouterModel(route="goal_interrogate", manage_action="none", tools=[])
 
     if phase == "creating":
@@ -537,6 +598,14 @@ def apply_goal_router_guards(
         out = out.model_copy(update={"route": "goal_tasks_summary", "manage_action": "none", "tools": []})
         notes.append({"phase": "router_guard", "reason": "task_summary_over_schedule_read"})
 
+    coach = match_goal_coach_intent(message)
+    if coach and out.route in ("goal_tasks_summary", "goal_schedule_read", "goal_manage"):
+        if out.route != "goal_manage" or out.manage_action in ("none", "edit"):
+            out = coach
+            manage_action = "none"
+            tools = []
+            notes.append({"phase": "router_guard", "reason": "coach_over_list_or_schedule"})
+
     if out.route in ("goal_schedule_read", "goal_manage") and not tools:
         tools = default_tools_for_goal_route(out.route, manage_action=manage_action)
         if tools:
@@ -589,12 +658,14 @@ def apply_goal_route_guards(
 
     intake_only = ui_mode == "new_goal"
     if intake_only and phase in ("interrogate", "intake", "clarify", "") and not complete:
-        if out.route in ("goal_create",) and not complete:
-            out = out.model_copy(update={"route": "goal_interrogate", "manage_action": "none"})
-            reasons.append("block_create_until_answers")
-        elif out.route == "goal_chat":
-            out = out.model_copy(update={"route": "goal_interrogate", "manage_action": "none"})
-            reasons.append("interrogate_over_chat")
+        escape = match_intake_escape_intent(message)
+        if escape:
+            return escape, "intake_explicit_delete"
+        if out.route != "goal_interrogate" or out.manage_action != "none" or out.tools:
+            out = out.model_copy(
+                update={"route": "goal_interrogate", "manage_action": "none", "tools": []}
+            )
+            reasons.append("force_intake_phase")
         return out, "|".join(reasons) if reasons else "ok"
 
     if phase == "active" and out.route == "goal_interrogate":
@@ -629,6 +700,29 @@ _CONFIRM_FRAGMENT = re.compile(
     r"^\s*(yes|no|yeah|yep|nope|ok|okay|sure|cancel|confirm|delete\s+it|go\s+ahead)\s*[!?.]*\s*$",
     re.I,
 )
+_CONFIRM_SHORT = re.compile(
+    r"^\s*(yes|no|yeah|yep|nope|nah|ok|okay|sure|cancel|confirm|leave\s+it|don't|do\s+not)\b",
+    re.I,
+)
+
+
+def should_hold_pending_manage(message: str) -> bool:
+    """True only when the user is answering a pending delete confirm (yes/no), not a new question."""
+    text = (message or "").strip()
+    if not text:
+        return False
+    if _CONFIRM_FRAGMENT.match(text):
+        return True
+    if len(text) <= 48 and _CONFIRM_SHORT.match(text):
+        if not re.search(r"\b(tasks?|goals?|today|what|show|list|calendar|schedule|progress)\b", text, re.I):
+            return True
+    return False
+
+
+def _is_all_goals_list_query(text: str) -> bool:
+    if _DAY_SCOPED_TASK_OR_GOAL.search(text):
+        return False
+    return bool(_WHAT_GOALS_PATTERNS.search(text) or _GOALS_LIST_PATTERNS.search(text))
 
 GOAL_ROUTER_JSON_CONTRACT = (
     'JSON only: {"route": string, "manage_action": string, "tools": array}\n'
@@ -646,30 +740,29 @@ GOAL_ROUTER_JSON_CONTRACT = (
 GOAL_ROUTER_SYSTEM = (
     "TodAI goal-plan router. Route CURRENT_USER_MESSAGE using GOAL_CONTEXT + ROUTING_CONTEXT.\n"
     + GOAL_ROUTER_JSON_CONTRACT
-    + "ROUTING_CONTEXT: prior user lines + sometimes last assistant (confirmations, follow-ups).\n"
-    "CURRENT_USER_MESSAGE in the last user block is what you route — use context only for short replies "
-    "(e.g. 'yes' after assistant asked to delete → goal_manage, delete_goal).\n"
-    "Routes:\n"
-    "- goal_interrogate: user answers setup Qs (objective, difficulty, tasks/day, minutes). "
-    "Use when plan has no tasks yet OR ui_mode=new_goal during intake.\n"
-    "- goal_confirm: phase confirm; user yes/no to summary.\n"
-    "- goal_create: user wants to build/generate tasks AND setup answers are complete; "
-    "or confirms yes after summary. Phrases: create tasks, build my plan, generate schedule.\n"
-    "- goal_manage: list/review goals, delete/remove, edit tasks. Set manage_action AND tools.\n"
-    "  delete_goal — remove goal + plan + all tasks + chat ('delete my goal').\n"
-    "  delete_plan — clear entire 7-day week tasks, keep goal ('reset week', 'delete all plan tasks').\n"
-    "  delete_day — remove tasks on one day only ('remove Tuesday tasks'). tools [].\n"
-    "  delete_task — remove one task ('delete first task on Friday'). tools [].\n"
-    "  delete_all — all goals. list — show progress.\n"
-    "- goal_tasks_summary: list tasks, one day, progress, guidance/how-to help. tools [].\n"
-    "  No calendar tools.\n"
-    "- goal_schedule_read: calendar events + free time + plan panel (my schedule, free time, busy).\n"
-    "  tools: get_schedule_range + get_free_time.\n"
-    "- goal_chat: greetings, thanks, general help, today's date (use GOAL_CONTEXT.server_today).\n"
-    "ui_mode=new_goal + needs_task_setup: route setup answers → goal_interrogate; "
-    "when intake complete → goal_confirm / goal_create.\n"
-    "ui_mode=my_goals: goal_chat, goal_manage, goal_tasks_summary, goal_schedule_read (no intake).\n"
-    "pending_manage in GOAL_CONTEXT: user confirming prior delete/list — keep goal_manage + same action.\n"
+    + "PHASE LOCKS (read GOAL_CONTEXT.phase + needs_task_setup first):\n"
+    "- phase interrogate/intake + needs_task_setup: ALWAYS goal_interrogate. "
+    "Setup answers (objective, tasks/day, skip days, none, no days to skip) are NOT manage/chat. "
+    "ONLY exception: explicit delete goal/plan ('delete my goal', 'remove this plan').\n"
+    "- phase confirm: goal_confirm (yes/no, edit settings). goal_create only if user confirms build. "
+    "Explicit delete → goal_manage.\n"
+    "- phase active + ui_mode my_goals: full routes below.\n"
+    "DISAMBIGUATION:\n"
+    "- goal_tasks_summary = task list OR progress for current/this goal (progress, % done, how many completed, show my plan, Wednesday tasks, tasks/goals for today/this day). tools [].\n"
+    "- goal_manage list = ALL goals overview (list my goals, review goals) — NOT tasks for today or this goal. tools list_goals_with_progress.\n"
+    "- goal_chat = COACHING (hardest days, how-to, tips, on track) OR what date/day is today — not a task table. tools [].\n"
+    "- goal_schedule_read = calendar events + free time slots — NOT 'what date is today'.\n"
+    "- goal_manage edit = move/reschedule/mark done on existing tasks — NOT intake skip-day answers.\n"
+    "- phase active: progress/how much done → goal_tasks_summary, NEVER goal_interrogate.\n"
+    "ROUTES:\n"
+    "- goal_interrogate: setup Q&A (new_goal tab, no tasks yet).\n"
+    "- goal_confirm: review summary; yes/no; inline setting changes.\n"
+    "- goal_create: build tasks when answers complete + user confirms.\n"
+    "- goal_manage: delete_goal | delete_plan | delete_day | delete_task | delete_all | list | edit.\n"
+    "- goal_schedule_read: calendar + free time. tools: get_schedule_range, get_free_time.\n"
+    "pending_manage in GOAL_CONTEXT: ONLY route goal_manage for short yes/no/cancel after a delete confirm.\n"
+    "If user asks a NEW question (tasks today, what date, show plan, list tasks) → ignore pending_manage; route normally.\n"
+    "Use ROUTING_CONTEXT only for short replies (yes after delete prompt → goal_manage).\n"
     "Output JSON only.\n"
 )
 
@@ -882,7 +975,7 @@ def route_goal_turn(
     """
     session = session or {}
     pending = session.get("pending_manage")
-    if pending:
+    if pending and should_hold_pending_manage(message):
         kind = str(pending.get("kind") or "")
         action = {
             "delete_all": "delete_all",
@@ -940,17 +1033,36 @@ def route_goal_turn(
     else:
         reason = "groq"
         manage_op = match_goal_manage_intent(message)
+        in_intake = phase in ("interrogate", "intake", "clarify", "") and not answers_complete(
+            answers
+        )
         if manage_op and (
             model.route != "goal_manage"
             or (model.manage_action == "none" and manage_op.manage_action != "none")
         ):
-            model = manage_op
-            source = "rules_override"
+            if not in_intake or manage_op.manage_action in (
+                "delete_goal",
+                "delete_plan",
+                "delete_all",
+            ):
+                model = manage_op
+                source = "rules_override"
         elif phase == "active":
             op = match_operational_intent(message)
-            if op and op.route == "goal_manage" and model.route == "goal_chat":
-                model = op
-                source = "rules_override"
+            if op:
+                if op.route == "goal_tasks_summary" and model.route != "goal_tasks_summary":
+                    model = op
+                    source = "rules_override"
+                elif op.route == "goal_chat" and model.route in (
+                    "goal_schedule_read",
+                    "goal_manage",
+                    "goal_tasks_summary",
+                ):
+                    model = op
+                    source = "rules_override"
+                elif op.route == "goal_manage" and model.route == "goal_chat":
+                    model = op
+                    source = "rules_override"
 
     model, guard_notes = apply_goal_router_guards(
         model,

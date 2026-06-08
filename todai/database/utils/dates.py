@@ -10,6 +10,7 @@ from todai.database.utils.tz import get_timezone
 
 _TODAY_QUESTION = re.compile(
     r"(?i)\b(?:"
+    r"whats?\s+(?:the\s+)?(?:day|date)(?:\s+today)?|"
     r"what(?:'s|\s+is)\s+(?:the\s+)?(?:day|date)(?:\s+today)?|"
     r"what\s+day\s+is\s+(?:it|today)|"
     r"what\s+is\s+(?:the\s+)?current\s+(?:day|date)|"

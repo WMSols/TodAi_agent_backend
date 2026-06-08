@@ -372,6 +372,36 @@ def groq_chat_json(
     max_tokens: int | None = None,
     temperature: float = 0.15,
 ) -> dict[str, Any]:
+    override_applied = False
+    if phase.startswith("goal_"):
+        from todai.goal_planner.debug.prompt_overrides import apply_system_override
+
+        messages, override_applied = apply_system_override(phase, messages)
+    result = _groq_chat_json_impl(
+        messages,
+        phase=phase,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+    if phase.startswith("goal_"):
+        from todai.goal_planner.debug.turn_trace import record_groq_call
+
+        record_groq_call(
+            phase=phase,
+            messages=messages,
+            result=result,
+            override_applied=override_applied,
+        )
+    return result
+
+
+def _groq_chat_json_impl(
+    messages: list[dict[str, str]],
+    *,
+    phase: str,
+    max_tokens: int | None = None,
+    temperature: float = 0.15,
+) -> dict[str, Any]:
     user_id = current_turn_user_id()
     messages = _ensure_json_mode_messages(messages)
     json_mode_fallback = False

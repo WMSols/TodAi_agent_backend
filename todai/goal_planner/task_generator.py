@@ -22,11 +22,10 @@ _DESC_RULE = (
 )
 
 _DAY_SYSTEM = (
-    "You design one day of a multi-day goal plan. Build a stepwise curriculum: "
-    "earlier days = foundations, later days = harder practice toward the week outcome. "
+    "One day of a progressive 7-day plan toward the objective. "
     + _DESC_RULE
-    + " Return JSON only: {\"tasks\": [{\"title\": string, \"description\": string}, ...]} "
-    "Same count and order as input slots. No markdown."
+    + ' JSON: {"tasks":[{"title":string,"description":string},...]} '
+    "MUST return exactly as many tasks as input slots (same order). No markdown."
 )
 
 # Detect old rotating templates so we never silently accept them.
@@ -182,10 +181,12 @@ def _generate_progressive_specs(
         if err:
             return [], err
         if len(specs) != len(day_tasks):
-            return [], GoalTaskGenerationError(
-                code="invalid_response",
-                message=f"day {day_idx}: expected {len(day_tasks)} tasks, got {len(specs)}",
-            )
+            specs = _reconcile_day_specs(specs, day_tasks, objective=objective, day_index=day_idx)
+            if len(specs) != len(day_tasks):
+                return [], GoalTaskGenerationError(
+                    code="invalid_response",
+                    message=f"day {day_idx}: expected {len(day_tasks)} tasks, got {len(specs)}",
+                )
         for s in specs:
             if _is_generic_template_task(s.get("title", ""), s.get("description", "")):
                 return [], GoalTaskGenerationError(
@@ -196,6 +197,35 @@ def _generate_progressive_specs(
         all_days.append(specs)
 
     return all_days, None
+
+
+def _reconcile_day_specs(
+    specs: list[dict[str, str]],
+    day_tasks: list[dict[str, Any]],
+    *,
+    objective: str,
+    day_index: int,
+) -> list[dict[str, str]]:
+    """Static trim/pad after Groq when count drifts."""
+    need = len(day_tasks)
+    if len(specs) > need:
+        return specs[:need]
+    if len(specs) >= need:
+        return specs
+    out = list(specs)
+    focus = (objective or "your goal").strip()[:80]
+    while len(out) < need:
+        n = len(out) + 1
+        out.append(
+            {
+                "title": f"Day {day_index} practice block {n}"[:120],
+                "description": (
+                    f"Focused practice {n} toward {focus}. "
+                    "Complete at your own pace in the scheduled window."
+                )[:500],
+            }
+        )
+    return out
 
 
 def _groq_specs_for_day(
@@ -222,8 +252,8 @@ def _groq_specs_for_day(
         "prior_days_focus": prior_topics,
         "slots": slots,
         "rules": (
-            f"Day {day_index}/{total_days}: teach the next step toward the objective. "
-            "Do not repeat prior days verbatim. Increase challenge toward the end of the week."
+            f"Day {day_index}/{total_days}; {len(slots)} task(s) required. "
+            "Progressive steps; no repeat of prior days."
         ),
     }
     max_tokens = min(900, 120 + 90 * len(slots))

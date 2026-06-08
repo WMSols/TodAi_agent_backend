@@ -1,4 +1,4 @@
-"""Per-answer validation for AI goal intake (local parsers + Groq normalize + backend verify)."""
+"""Per-answer validation for AI goal intake (Groq normalize first + static verify; local fallback)."""
 
 from __future__ import annotations
 
@@ -21,20 +21,20 @@ logger = logging.getLogger(__name__)
 
 IntakeStatus = Literal["ok", "aborted"]
 
+_SKIP_DAYS_GROQ_RULES = (
+    "skip_days: Python ints 0=Mon..6=Sun (NOT ISO). 'monday'→[0]; 'weekends'→[5,6]. "
+    "[] = no skip days: none, no skip, no days to skip, no any days, not any day to skip. "
+    "One weekday is a complete answer. status ok whenever parsedValue is valid — never abort valid []."
+)
+
 _GROQ_STRUCTURED_SYSTEM = (
-    "Validate and normalize ONE goal-setup answer. JSON only:\n"
+    "Normalize ONE intake answer. JSON: "
     '{"status":"ok"|"aborted","replyText":string,"parsedValue":value}\n'
-    "status ok only if the answer is on-topic AND parsedValue matches fieldType.\n"
-    "Convert informal phrasing (e.g. two tasks → 2, skip Thursday → [3]).\n"
-    "replyText: short ack if ok; one gentle hint if aborted (max 20 words).\n"
-    "parsedValue types by fieldType:\n"
-    "- tasks_per_day: integer 1-5\n"
-    "- skip_days: array of weekday ints 0=Mon..6=Sun; [] for none/every day\n"
-    "- objective | open: string (specific 7-day outcome or normalized answer)\n"
-    "- difficulty: easy | medium | hard\n"
-    "- minutes_per_day | time_commitment: integer minutes 5-480\n"
-    "- schedule: string summary\n"
-    "Be LENIENT on wording; only abort if empty, random, or completely unrelated."
+    "ok if on-topic AND parsedValue matches fieldType. Abort ONLY if empty or totally unrelated.\n"
+    "types: tasks_per_day int 1-5; skip_days int[]; "
+    f"skip_days: {_SKIP_DAYS_GROQ_RULES} "
+    "objective/open string; difficulty easy|medium|hard; minutes int 5-480.\n"
+    "replyText ≤12 words."
 )
 
 _CHITCHAT = re.compile(
@@ -85,6 +85,19 @@ class IntakeValidation:
 
 
 # Fixed intake step ids — must win over fuzzy question-text regexes.
+_STRUCTURED_KINDS = frozenset(
+    {
+        "tasks_per_day",
+        "skip_days",
+        "minutes_per_day",
+        "time_commitment",
+        "difficulty",
+        "objective",
+        "schedule",
+        "open",
+    }
+)
+
 _KNOWN_QID_KINDS: dict[str, str] = {
     "skip_days": "skip_days",
     "tasks_per_day": "tasks_per_day",
@@ -149,14 +162,6 @@ def validate_intake_answer(
             source="local",
         )
 
-    if _is_yes_no_question(qtext) and _is_yes_no_answer(text):
-        return IntakeValidation(
-            status="ok",
-            reply_text="Got it — noted.",
-            source="local",
-            parsed_value=text,
-        )
-
     if _CHITCHAT.match(text) and len(text) < 12:
         return IntakeValidation(
             status="aborted",
@@ -165,58 +170,84 @@ def validate_intake_answer(
         )
 
     kind = _KNOWN_QID_KINDS.get(qid.lower()) or infer_question_kind(qid, qtext)
-    local = _validate_local(kind, text, default_objective=default_objective)
 
+    if allow_groq and kind in _STRUCTURED_KINDS:
+        groq = _validate_groq_structured(
+            kind,
+            qtext,
+            text,
+            goal_title,
+            allow_groq=allow_groq,
+        )
+        if groq is not None:
+            if groq.status == "aborted":
+                if kind == "skip_days":
+                    local_fb = _local_structured_fallback(
+                        kind, text, default_objective=default_objective
+                    )
+                    if local_fb is not None:
+                        return local_fb
+                    empty_skip = _normalize_skip_parsed(groq.parsed_value)
+                    if empty_skip is not None and empty_skip == []:
+                        return IntakeValidation(
+                            status="ok",
+                            reply_text="No skip days — tasks every day.",
+                            source="groq_reconcile",
+                            parsed_value=[],
+                        )
+                if kind in ("open", "objective") and _lenient_accept(qtext, text):
+                    fallback = _validate_local("objective", text, default_objective=default_objective)
+                    if fallback.valid:
+                        return _validation_from_parse(fallback, kind, source="local_override")
+                    return IntakeValidation(
+                        status="ok",
+                        reply_text="Got it.",
+                        source="local_override",
+                        parsed_value=text[:500],
+                    )
+                local_fb = _local_structured_fallback(
+                    kind, text, default_objective=default_objective
+                )
+                if local_fb is not None:
+                    return local_fb
+                return groq
+
+            verified = _verify_parsed_value(
+                kind,
+                groq.parsed_value,
+                raw_text=text,
+                default_objective=default_objective,
+            )
+            if verified.valid:
+                ack = groq.reply_text or _ack_from_parse(verified, kind)
+                return IntakeValidation(
+                    status="ok",
+                    reply_text=ack,
+                    source="groq_verified",
+                    parsed_value=verified.parsed,
+                )
+            hint = verified.hint or groq.reply_text or "Please answer in the format the question asks for."
+            local_fb = _local_structured_fallback(
+                kind, text, default_objective=default_objective
+            )
+            if local_fb is not None:
+                return local_fb
+            return IntakeValidation(status="aborted", reply_text=hint, source="groq_rejected")
+
+    # Offline / Groq unavailable: static parsers verify only (no Groq normalization).
+    if _is_yes_no_question(qtext) and _is_yes_no_answer(text):
+        return IntakeValidation(
+            status="ok",
+            reply_text="Got it — noted.",
+            source="local",
+            parsed_value=text,
+        )
+
+    local = _validate_local(kind, text, default_objective=default_objective)
     if local.valid:
         return _validation_from_parse(local, kind, source="local")
 
-    groq = _validate_groq_structured(
-        kind,
-        qtext,
-        text,
-        goal_title,
-        allow_groq=allow_groq,
-    )
-    if groq is not None:
-        if groq.status == "aborted":
-            if kind in ("open", "objective") and _lenient_accept(qtext, text):
-                fallback = _validate_local("objective", text, default_objective=default_objective)
-                if fallback.valid:
-                    return _validation_from_parse(fallback, kind, source="local_override")
-                return IntakeValidation(
-                    status="ok",
-                    reply_text="Got it.",
-                    source="local_override",
-                    parsed_value=text[:500],
-                )
-            return groq
-
-        verified = _verify_parsed_value(
-            kind,
-            groq.parsed_value,
-            raw_text=text,
-            default_objective=default_objective,
-        )
-        if verified.valid:
-            ack = groq.reply_text or _ack_from_parse(verified, kind)
-            return IntakeValidation(
-                status="ok",
-                reply_text=ack,
-                source="groq_verified",
-                parsed_value=verified.parsed,
-            )
-        hint = verified.hint or groq.reply_text or "Please answer in the format the question asks for."
-        return IntakeValidation(status="aborted", reply_text=hint, source="groq_rejected")
-
-    if kind in (
-        "tasks_per_day",
-        "minutes_per_day",
-        "difficulty",
-        "time_commitment",
-        "skip_days",
-        "objective",
-        "schedule",
-    ):
+    if kind in _STRUCTURED_KINDS:
         return IntakeValidation(
             status="aborted",
             reply_text=local.hint or "Please answer in the format the question asks for.",
@@ -276,38 +307,86 @@ def _validate_local(kind: str, text: str, *, default_objective: str) -> ParseRes
     return ParseResult(valid=True, parsed=text[:500])
 
 
+def verify_intake_field(
+    kind: str,
+    parsed: Any,
+    *,
+    raw_text: str = "",
+    default_objective: str = "",
+    prior_skip_days: list[int] | None = None,
+    confirm_edit: bool = False,
+) -> ParseResult:
+    """Public static verifier for Groq-normalized intake or confirm-edit values."""
+    return _verify_parsed_value(
+        kind,
+        parsed,
+        raw_text=raw_text,
+        default_objective=default_objective,
+        prior_skip_days=prior_skip_days,
+        confirm_edit=confirm_edit,
+    )
+
+
+def _text_mentions_tasks_per_day(text: str) -> bool:
+    lower = (text or "").lower()
+    if re.search(r"\b([1-5])\b", lower):
+        return True
+    if re.search(r"\b(?:one|two|three|four|five)\b", lower) and re.search(
+        r"\b(?:task|tasks|per day|daily)\b", lower
+    ):
+        return True
+    if re.search(r"\b\d+\s*tasks?\b", lower):
+        return True
+    return False
+
+
+def _text_mentions_skip_change(text: str) -> bool:
+    lower = (text or "").lower()
+    if _text_mentions_weekday(lower):
+        return True
+    return bool(
+        re.search(
+            r"\b(?:none|no skip|no days? to skip|no any days?|not any day|every day|all days|"
+            r"weekends?|weekdays?|don't skip|do not skip)\b",
+            lower,
+        )
+    )
+
+
 def _verify_parsed_value(
     kind: str,
     parsed: Any,
     *,
     raw_text: str,
     default_objective: str = "",
+    prior_skip_days: list[int] | None = None,
+    confirm_edit: bool = False,
 ) -> ParseResult:
-    """Backend check on AI-normalized parsedValue (or re-parse raw text)."""
+    """Static verify after Groq: user text wins when parseable; else require text evidence."""
     if kind == "tasks_per_day":
-        if isinstance(parsed, (int, float)):
-            n = int(parsed)
-            if 1 <= n <= 5:
-                return ParseResult(valid=True, parsed=n, display=str(n))
         local = parse_answer("tasks_per_day", raw_text)
         if local.valid:
             return local
+        if isinstance(parsed, (int, float)):
+            n = int(parsed)
+            if 1 <= n <= 5 and _text_mentions_tasks_per_day(raw_text):
+                return ParseResult(valid=True, parsed=n, display=str(n))
         if isinstance(parsed, str):
-            return parse_answer("tasks_per_day", parsed)
+            sub = parse_answer("tasks_per_day", parsed)
+            if sub.valid:
+                return sub
         return ParseResult(
             valid=False,
             hint="Send a whole number from **1 to 5** (example: 2 or *two tasks*).",
         )
 
     if kind == "skip_days":
-        normalized = _normalize_skip_parsed(parsed)
-        if normalized is not None:
-            return ParseResult(
-                valid=True,
-                parsed=normalized,
-                display=format_skip_days(normalized),
-            )
-        return parse_skip_days(raw_text)
+        return _verify_skip_days(
+            parsed,
+            raw_text,
+            prior_skip_days=prior_skip_days,
+            confirm_edit=confirm_edit,
+        )
 
     if kind == "difficulty":
         if isinstance(parsed, str):
@@ -328,10 +407,20 @@ def _verify_parsed_value(
         return _parse_time_commitment(raw_text)
 
     if kind == "objective":
+        from todai.goal_planner.interrogation import extract_objective_edit_text, is_goal_cancel_message
+
+        if is_goal_cancel_message(raw_text):
+            return ParseResult(valid=False, hint="Say **yes** to build, **no** to restart, or describe setting changes.")
+        edit_text = extract_objective_edit_text(raw_text)
+        local_obj = parse_answer("objective", edit_text, default_objective=default_objective)
+        if local_obj.valid and edit_text.strip() != raw_text.strip():
+            return local_obj
         if isinstance(parsed, str) and len(parsed.strip()) >= 3:
             val = parsed.strip()[:500]
-            return ParseResult(valid=True, parsed=val, display=val[:80])
-        return parse_answer("objective", raw_text, default_objective=default_objective)
+            verified = parse_answer("objective", val, default_objective=default_objective)
+            if verified.valid:
+                return ParseResult(valid=True, parsed=verified.parsed, display=str(verified.parsed)[:80])
+        return parse_answer("objective", edit_text, default_objective=default_objective)
 
     if kind == "schedule":
         if isinstance(parsed, str) and len(parsed.strip()) >= 5:
@@ -343,6 +432,64 @@ def _verify_parsed_value(
     if len(raw_text.strip()) >= 2:
         return ParseResult(valid=True, parsed=raw_text.strip()[:500])
     return ParseResult(valid=False, hint="Please add a bit more detail.")
+
+
+def _text_mentions_weekday(text: str) -> bool:
+    lower = (text or "").lower()
+    if re.search(r"\bweekends?\b", lower):
+        return True
+    if re.search(r"\bweekdays?\b", lower) and "weekend" not in lower:
+        return True
+    return any(
+        re.search(rf"\b{re.escape(name)}\b", lower) for name in _WEEKDAY_NAME_TO_DOW
+    )
+
+
+def _verify_skip_days(
+    parsed: Any,
+    raw_text: str,
+    *,
+    prior_skip_days: list[int] | None = None,
+    confirm_edit: bool = False,
+) -> ParseResult:
+    """Intake: static parse wins. Confirm edits: trust Groq merged skip_days ints."""
+    normalized = _normalize_skip_parsed(parsed)
+
+    if confirm_edit and normalized is not None and _text_mentions_skip_change(raw_text):
+        return ParseResult(
+            valid=True,
+            parsed=normalized,
+            display=format_skip_days(normalized),
+        )
+
+    local = parse_skip_days(raw_text)
+    if local.valid:
+        return local
+
+    if not _text_mentions_skip_change(raw_text):
+        return local
+
+    if normalized is not None:
+        return ParseResult(
+            valid=True,
+            parsed=normalized,
+            display=format_skip_days(normalized),
+        )
+    return local
+
+
+def _local_structured_fallback(
+    kind: str,
+    text: str,
+    *,
+    default_objective: str = "",
+) -> IntakeValidation | None:
+    if kind not in _STRUCTURED_KINDS:
+        return None
+    local = _validate_local(kind, text, default_objective=default_objective)
+    if local.valid:
+        return _validation_from_parse(local, kind, source="local_fallback")
+    return None
 
 
 def _normalize_skip_parsed(parsed: Any) -> list[int] | None:

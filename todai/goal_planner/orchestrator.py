@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from datetime import date, timedelta
 from typing import Any
 
@@ -21,13 +20,9 @@ from todai.goal_planner.interrogation import (
     STEPS,
     _answer_label,
     answers_complete,
-    confirmation_prompt,
-    current_step,
     ensure_plan_defaults,
     format_skip_days,
     next_missing_step,
-    parse_answer,
-    parse_confirmation,
     plan_difficulty,
     plan_minutes_per_day,
     plan_skip_days,
@@ -41,6 +36,7 @@ from todai.goal_planner.task_summary_reply import compose_task_summary_reply
 
 from todai.agent.tools.calendar import execute_read_tools
 from todai.goal_planner.routing import normalize_router_tools
+from todai.goal_planner.routing.router import should_hold_pending_manage
 
 UiMode = str  # "my_goals" | "new_goal"
 
@@ -84,6 +80,25 @@ def orchestrate_goal_turn(
         needs_task_setup=needs_setup,
         allow_groq=allow_groq,
     )
+    pending_reroute = False
+    if (
+        session.get("pending_manage")
+        and route_out.route == "goal_manage"
+        and not should_hold_pending_manage(message)
+    ):
+        session.pop("pending_manage", None)
+        route_out = route_goal_turn(
+            message=message,
+            phase=phase,
+            answers=answers,
+            plan_id=plan_id,
+            session=session,
+            history=history,
+            ui_mode=ui_mode,
+            needs_task_setup=needs_setup,
+            allow_groq=allow_groq,
+        )
+        pending_reroute = True
     setup_mode = intake_mode
     route = route_out.route
     manage_action = route_out.manage_action
@@ -103,6 +118,16 @@ def orchestrate_goal_turn(
     ]
     trace.extend(route_out.guard_notes)
 
+    if pending_reroute:
+        trace.append({"phase": "pending_cleared", "reason": "reroute", "route": route})
+    elif (
+        session.get("pending_manage")
+        and route != "goal_manage"
+        and not should_hold_pending_manage(message)
+    ):
+        session.pop("pending_manage", None)
+        trace.append({"phase": "pending_cleared", "reason": "new_intent", "route": route})
+
     if not intake_mode and needs_setup and route in ("goal_interrogate", "goal_confirm", "goal_create"):
         reply = (
             "This plan doesn't have tasks yet. Open the **New goal** tab to finish AI setup "
@@ -112,33 +137,40 @@ def orchestrate_goal_turn(
         return reply, {}, "goal_chat", trace
 
     if route == "goal_interrogate" and setup_mode:
-        if uses_ai_intake(session, ui_mode):
-            reply, patch, intake_meta = handle_ai_intake_turn(
-                session, message, allow_groq=allow_groq
+        if not uses_ai_intake(session, ui_mode):
+            trace.append({"phase": "legacy_static_intake_blocked", "intake_style": session.get("intake_style")})
+            return (
+                "This plan needs the **New goal** tab AI setup (not the old fixed 3-question wizard). "
+                "Open **New goal** and continue from there.",
+                {},
+                "goal_chat",
+                trace,
             )
-            session.update(patch)
-            trace.append(
-                {
-                    "phase": "goal_ai_intake",
-                    "intake_style": "ai",
-                    **intake_meta,
-                }
-            )
-            return reply, patch, route, trace
-        reply, patch = _handle_interrogate(store, plan_id, session, message)
+        reply, patch, intake_meta = handle_ai_intake_turn(
+            session, message, allow_groq=allow_groq
+        )
+        session.update(patch)
+        trace.append(
+            {
+                "phase": "goal_ai_intake",
+                "intake_style": "ai",
+                **intake_meta,
+            }
+        )
         return reply, patch, route, trace
 
     if route == "goal_confirm" and setup_mode:
-        if uses_ai_intake(session, ui_mode):
-            reply, patch = handle_ai_confirm(session, message)
-            session.update(patch)
-            trace.append({"phase": "goal_ai_intake", "step": "confirm"})
-            if patch.get("phase") == "ready":
-                reply, patch, create_trace = _handle_create(store, plan_id, {**session, **patch})
-                trace.extend(create_trace)
-                return reply, patch, "goal_create", trace
-            return reply, patch, route, trace
-        reply, patch = _handle_confirm(session, message)
+        if not uses_ai_intake(session, ui_mode):
+            trace.append({"phase": "legacy_static_confirm_blocked", "intake_style": session.get("intake_style")})
+            return (
+                "Please finish setup on the **New goal** tab (AI intake + review), then reply **yes** to build tasks.",
+                {},
+                "goal_chat",
+                trace,
+            )
+        reply, patch = handle_ai_confirm(session, message, allow_groq=allow_groq)
+        session.update(patch)
+        trace.append({"phase": "goal_ai_intake", "step": "confirm"})
         if patch.get("phase") == "ready":
             reply, patch, create_trace = _handle_create(store, plan_id, {**session, **patch})
             trace.extend(create_trace)
@@ -152,7 +184,11 @@ def orchestrate_goal_turn(
 
     if route == "goal_tasks_summary":
         reply, patch, sum_trace = _handle_tasks_summary(
-            store, plan_id, message, history=history
+            store,
+            plan_id,
+            message,
+            history=history,
+            server_today=session.get("server_today"),
         )
         trace.extend(sum_trace)
         return reply, patch, route, trace
@@ -173,6 +209,7 @@ def orchestrate_goal_turn(
             session=session,
             history=history,
             router_tools=router_tools,
+            allow_groq=allow_groq,
         )
         trace.extend(manage_trace)
         return reply, patch, route, trace
@@ -200,8 +237,8 @@ def orchestrate_goal_turn(
         )
 
     reply = (
-        "I'll ask **3 short questions**, then build a 7-day task plan (you can skip weekdays). "
-        "Answer each question in order."
+        "Use the **New goal** tab to describe what you want — I'll ask tailored questions, "
+        "then build a 7-day task plan."
     )
     return reply, {}, "goal_chat", trace
 
@@ -242,139 +279,6 @@ def _seed_intake_from_goal(session: dict[str, Any]) -> dict[str, Any]:
     }
     nxt = next_missing_step(answers) or "difficulty"
     return {"answers": answers, "intake_step": nxt, "phase": "interrogate"}
-
-
-def _message_answers_intake_step(session: dict[str, Any], message: str) -> bool:
-    """True when message is a valid answer for the current intake step (not small talk)."""
-    answers = session.get("answers") or {}
-    step = current_step(session) or next_missing_step(answers)
-    if not step:
-        return False
-    result = parse_answer(step, message, default_objective=_default_objective(session))
-    return bool(result.valid)
-
-
-def _default_objective(session: dict[str, Any]) -> str:
-    title = (session.get("title") or "").strip()
-    desc = (session.get("description") or "").strip()
-    if title and desc:
-        return f"{title} — {desc}"
-    return title or desc
-
-
-def _handle_interrogate(
-    store: GoalPlanSessionStore,
-    plan_id: str,
-    session: dict[str, Any],
-    message: str,
-) -> tuple[str, dict[str, Any]]:
-    answers = session.setdefault("answers", {})
-    step = current_step(session) or next_missing_step(answers) or STEPS[0]
-
-    if answers_complete(answers):
-        session["phase"] = "confirm"
-        store._save_plan_session(plan_id, session)
-        return confirmation_prompt(answers), {"phase": "confirm"}
-
-    if step and (not answers.get(step) or not answers[step].get("valid")):
-        result = parse_answer(step, message, default_objective=_default_objective(session))
-        if not result.valid:
-            return (
-                f"{result.hint}\n\n{question_for_step(step, session)}",
-                {"phase": "interrogate", "intake_step": step},
-            )
-        answers[step] = {
-            "valid": True,
-            "parsed": result.parsed,
-            "raw": message.strip(),
-            "display": result.display or "",
-        }
-        ack = _ack(step, result)
-        nxt = next_missing_step(answers)
-        if nxt:
-            session["phase"] = "interrogate"
-            session["intake_step"] = nxt
-            store._save_plan_session(plan_id, session)
-            return (
-                f"{ack}\n\n{question_for_step(nxt, session)}",
-                {"phase": "interrogate", "intake_step": nxt, "answers": answers},
-            )
-        session["phase"] = "confirm"
-        store._save_plan_session(plan_id, session)
-        return f"{ack}\n\n{confirmation_prompt(answers)}", {"phase": "confirm", "answers": answers}
-
-    return question_for_step(step, session), {"phase": "interrogate", "intake_step": step}
-
-
-def _ack(step: str, result: Any) -> str:
-    label = getattr(result, "display", None) or str(getattr(result, "parsed", ""))
-    if step == "objective":
-        return f"Saved — objective: {label}"
-    if step == "difficulty":
-        return f"Saved — difficulty: **{label}**"
-    if step == "tasks_per_day":
-        return f"Saved — **{label}** task(s) per active day"
-    if step == "skip_days":
-        return f"Saved — {label}"
-    if step == "minutes_per_day":
-        return f"Saved — daily time: **{label}**"
-    return "Saved."
-
-
-def _handle_confirm(session: dict[str, Any], message: str) -> tuple[str, dict[str, Any]]:
-    from todai.goal_planner.interrogation import try_apply_confirm_edits
-
-    answers = dict(session.get("answers") or {})
-    default_obj = _default_objective(session)
-    answers, ack = try_apply_confirm_edits(message, answers, default_objective=default_obj)
-    choice = parse_confirmation(message)
-    if ack:
-        if choice == "yes":
-            return "", {"phase": "ready", "answers": answers}
-        return (
-            f"Updated — {ack}\n\n{confirmation_prompt(answers)}\n\n(Reply **yes** to build the plan.)",
-            {"phase": "confirm", "answers": answers},
-        )
-    if choice == "yes":
-        return "", {"phase": "ready", "answers": answers}
-    if choice == "no":
-        return (
-            "No problem. Tell me which answer to change (objective, difficulty, tasks per day, or minutes per day).",
-            {"phase": "interrogate"},
-        )
-    if re_mentions_step(message):
-        step = _step_from_change_request(message)
-        if step:
-            if step in answers:
-                answers[step] = {"valid": False}
-            return (
-                f"Okay — let's update **{step.replace('_', ' ')}**.\n\n{question_for_step(step, session)}",
-                {"phase": "interrogate", "intake_step": step, "answers": answers},
-            )
-    return (
-        f"{confirmation_prompt(answers)}\n\n(Reply **yes** to build the plan.)",
-        {"phase": "confirm"},
-    )
-
-
-def re_mentions_step(message: str) -> bool:
-    t = message.lower()
-    return any(k in t for k in ("objective", "difficulty", "task", "minute", "time", "easy", "hard"))
-
-
-def _step_from_change_request(message: str) -> str | None:
-    t = message.lower()
-    if "objective" in t or "goal" in t:
-        return "objective"
-    if "difficult" in t or "easy" in t or "hard" in t or "medium" in t:
-        return "difficulty"
-    if "task" in t and "day" in t:
-        return "tasks_per_day"
-    if "skip" in t or any(w in t for w in ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "weekend")):
-        return "skip_days"
-    if "minute" in t or "hour" in t or "time" in t:
-        return "minutes_per_day"
-    return None
 
 
 def _handle_create(
@@ -476,6 +380,7 @@ def _handle_create(
         start=start,
         end=end,
         title=f"Goal plan: {objective[:50]}",
+        goal_objective=objective,
         tool_results=tool_results,
     )
     prog = display.get("progress") or {}
@@ -522,16 +427,18 @@ def _handle_tasks_summary(
     message: str = "",
     *,
     history: list[dict[str, Any]] | None = None,
+    server_today: dict[str, str] | None = None,
 ) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
     """List this plan's goal tasks only — no calendar events or free-time reads."""
     from todai.database.utils.dates import format_today_reply, is_today_question
     from todai.goal_planner.today_context import get_server_today_for_user
 
     trace: list[dict[str, Any]] = [{"phase": "goal_tasks_summary"}]
+    if not server_today:
+        server_today = get_server_today_for_user(store.api_user_id)
     if is_today_question(message):
-        today = get_server_today_for_user(store.api_user_id)
         trace.append({"phase": "today_reply", "source": "server"})
-        return format_today_reply(today), {}, trace
+        return format_today_reply(server_today), {}, trace
     plan_row = store.get_plan_row(plan_id)
     if not plan_row:
         return "Plan not found.", {}, trace
@@ -541,7 +448,14 @@ def _handle_tasks_summary(
     all_tasks = store.list_goal_tasks(plan_id)
     trace.append({"phase": "tasks_loaded", "goal_tasks": len(all_tasks)})
 
-    query = parse_task_summary_query(message, start=start, end=end, tasks=all_tasks)
+    today_iso = (server_today or {}).get("iso")
+    query = parse_task_summary_query(
+        message,
+        start=start,
+        end=end,
+        tasks=all_tasks,
+        today_iso=today_iso,
+    )
     trace.append(
         {
             "phase": "task_query",
@@ -549,6 +463,7 @@ def _handle_tasks_summary(
             "dates": list(query.dates),
             "day_label": query.day_label or None,
             "matched": len(query.matched_tasks),
+            "server_today": today_iso,
         }
     )
 
@@ -568,10 +483,14 @@ def _handle_tasks_summary(
     else:
         view_tasks = all_tasks
 
-    display = build_goal_plan_schedule_display(all_tasks, start=start, end=end, tool_results=None)
     goal_title, objective = _plan_goal_context(store, plan_id, plan_row)
-    sess = store._load_plan_session(plan_id) or {}
-    server_today = sess.get("server_today")
+    display = build_goal_plan_schedule_display(
+        all_tasks,
+        start=start,
+        end=end,
+        goal_objective=objective,
+        tool_results=None,
+    )
     reply, source = compose_task_summary_reply(
         message=message,
         history=history,
@@ -636,10 +555,12 @@ def _handle_schedule_read(
             "goal_tasks": len(tasks),
         }
     )
+    _, objective = _plan_goal_context(store, plan_id, plan_row)
     display = build_goal_plan_schedule_display(
         tasks,
         start=start,
         end=end,
+        goal_objective=objective,
         tool_results=results,
     )
     reply = format_plan_schedule_reply(

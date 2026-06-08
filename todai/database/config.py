@@ -27,6 +27,8 @@ __all__ = [
     "supabase_anon_key",
     "supabase_service_role_key",
     "seed_dir",
+    "server_port",
+    "cors_allowed_origins",
 ]
 
 # Sandbox user id in API → fixed UUID in Postgres when not authenticated.
@@ -113,3 +115,29 @@ def storage_backend_label() -> str:
 def seed_dir() -> Path:
     """Default calendar/profile JSON used only to seed new Supabase users."""
     return Path(__file__).resolve().parent / "seed" / "default"
+
+
+def server_port(default: int = 8000) -> int:
+    """Bind port: Render sets PORT; local dev may use TODAI_PORT."""
+    for key in ("PORT", "TODAI_PORT"):
+        raw = os.environ.get(key, "").strip()
+        if raw:
+            try:
+                return int(raw)
+            except ValueError:
+                pass
+    return default
+
+
+def cors_allowed_origins() -> list[str]:
+    """
+    Comma-separated CORS_ORIGINS for external web clients (Flutter web, separate SPA).
+    Empty = no CORS middleware (bundled UI on same host still works).
+    Use * to allow any origin (no credentials).
+    """
+    raw = os.environ.get("CORS_ORIGINS", "").strip()
+    if not raw:
+        return []
+    if raw == "*":
+        return ["*"]
+    return [part.strip() for part in raw.split(",") if part.strip()]

@@ -94,6 +94,15 @@ function renderScheduleDisplay(display, options) {
         tit.textContent = titleText;
         item.appendChild(time);
         item.appendChild(tit);
+        if (slot.goal_objective) {
+          const goal = document.createElement("div");
+          goal.className = "cal-slot-goal";
+          goal.style.fontSize = "0.68rem";
+          goal.style.color = "#6b8fbf";
+          goal.style.gridColumn = "1 / -1";
+          goal.textContent = slot.goal_objective;
+          item.appendChild(goal);
+        }
         if (slot.description) {
           const desc = document.createElement("div");
           desc.className = "cal-slot-desc";

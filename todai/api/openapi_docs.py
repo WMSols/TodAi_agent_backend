@@ -76,20 +76,27 @@ DOC_CAL_AGENDA = _doc(
 DOC_CAL_CREATE = _doc(
     purpose="Create a calendar event.",
     inputs=f"{_BEARER}\n\nBody: `title`, `start`, `end` (e.g. `2026-06-03T09:00:00`), optional `description`, `recurrence`.",
-    outputs="`ok`, `events[]`, `schedule_version`.",
-    note="Recurrence `skip_days`: 0=Monday … 6=Sunday.",
+    outputs="`ok`, `events[]` (one row per occurrence), `schedule_version`.",
+    note="Recurrence: `frequency` daily (`repeat_days`) or weekly (`repeat_weeks`, optional `skip_days` 0=Mon..6=Sun).",
 )
 
 DOC_CAL_UPDATE = _doc(
     purpose="Update an event.",
-    inputs=f"{_BEARER}\n\nPath: `event_id`. Body: fields to change only.",
-    outputs="`ok`, `event`, `schedule_version`.",
+    inputs=(
+        f"{_BEARER}\n\nPath: `event_id`. Body: fields to change only.\n\n"
+        "Query `update_series=true` to apply changes to every event with the same `recurrence_id` "
+        "(title, notes, and time-of-day on each occurrence's date)."
+    ),
+    outputs="`ok`, `event`, `updated`, `scope` (`occurrence` | `series`), `schedule_version`.",
 )
 
 DOC_CAL_DELETE = _doc(
     purpose="Delete an event.",
-    inputs=f"{_BEARER}\n\nPath: `event_id`. Query `delete_series=true` to delete a full repeat series.",
-    outputs="`ok`, `deleted`, `schedule_version`.",
+    inputs=(
+        f"{_BEARER}\n\nPath: `event_id`.\n\n"
+        "Query `delete_series=true` to delete every event sharing `recurrence_id` and remove the recurrence rule."
+    ),
+    outputs="`ok`, `deleted`, `scope` (`occurrence` | `series`), `schedule_version`.",
 )
 
 DOC_GOAL_START = _doc(

@@ -25,6 +25,12 @@ from todai.goal_planner.orchestrator import orchestrate_goal_turn
 from todai.goal_planner.plan_resolver import resolve_plan_for_turn
 
 from todai.goal_planner.session_store import GoalPlanSessionStore
+from todai.goal_planner.debug.turn_trace import (
+    begin_goal_turn_trace,
+    clear_goal_turn_trace,
+    get_turn_groq_calls,
+)
+from todai.goal_planner.debug.prompt_overrides import list_overrides
 
 from todai.agent.planner.groq_config import GROQ_API_KEY
 from todai.api.middleware.rate_limit import groq_tracker
@@ -278,6 +284,7 @@ def process_goal_plan_message(
     """One goal planning turn: router → interrogate / confirm / create / schedule read."""
 
     groq_tracker.begin_turn(user_id)
+    begin_goal_turn_trace()
     allow_groq, preflight_usage = _goal_groq_allowed(user_id)
 
     store = GoalPlanSessionStore(user_id)
@@ -352,6 +359,9 @@ def process_goal_plan_message(
 
 
 
+    groq_trace = get_turn_groq_calls()
+    clear_goal_turn_trace()
+
     if reply:
 
         store.append_turn(
@@ -362,7 +372,13 @@ def process_goal_plan_message(
 
             assistant_message=reply,
 
-            meta={"phase": phase, "route": route},
+            meta={
+                "phase": phase,
+                "route": route,
+                "ui_mode": ui_mode,
+                "tool_trace": tool_trace,
+                "groq_trace": groq_trace,
+            },
 
         )
 
@@ -423,10 +439,14 @@ def process_goal_plan_message(
         payload["debug"]["ui_mode"] = ui_mode
 
     payload["api_usage"] = usage
+    if groq_trace:
+        payload["groq_trace"] = groq_trace
 
     if isinstance(payload.get("debug"), dict):
 
         payload["debug"]["api_usage"] = usage
+        if groq_trace:
+            payload["debug"]["groq_trace"] = groq_trace
 
     return payload
 
@@ -506,7 +526,10 @@ def get_goal_plan_state(
 
         tasks = store.list_goal_tasks(plan_id)
 
-        schedule_display = build_goal_plan_schedule_display(tasks, start=start, end=end)
+        objective = str(plan_row.get("plan_notes") or "").strip()
+        schedule_display = build_goal_plan_schedule_display(
+            tasks, start=start, end=end, goal_objective=objective
+        )
 
     messages = store.list_messages(plan_id) if include_messages else []
 
@@ -547,5 +570,43 @@ def get_goal_plan_state(
         payload["debug"]["api_usage"] = usage
 
     return payload
+
+
+def get_goal_debug_history(user_id: str, plan_id: str) -> dict[str, Any]:
+    """Turn history with persisted tool_trace and groq_trace from message meta."""
+    store = GoalPlanSessionStore(user_id)
+    session = store._load_plan_session(plan_id) or {}
+    messages = store.list_messages(plan_id)
+    turns: list[dict[str, Any]] = []
+    i = 0
+    while i < len(messages):
+        row = messages[i]
+        if row.get("role") != "user":
+            i += 1
+            continue
+        user_text = str(row.get("content") or "")
+        assistant = messages[i + 1] if i + 1 < len(messages) else None
+        if not assistant or assistant.get("role") != "assistant":
+            i += 1
+            continue
+        meta = assistant.get("meta") if isinstance(assistant.get("meta"), dict) else {}
+        turns.append(
+            {
+                "user_message": user_text,
+                "assistant_message": str(assistant.get("content") or ""),
+                "phase": meta.get("phase"),
+                "route": meta.get("route"),
+                "ui_mode": meta.get("ui_mode"),
+                "tool_trace": meta.get("tool_trace") or [],
+                "groq_trace": meta.get("groq_trace") or [],
+            }
+        )
+        i += 2
+    return {
+        "plan_id": plan_id,
+        "session": session,
+        "turns": turns,
+        "active_prompt_overrides": list_overrides(),
+    }
 
 

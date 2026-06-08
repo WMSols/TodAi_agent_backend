@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from todai.agent.core.schedule_display import (
@@ -43,6 +43,7 @@ def build_goal_plan_schedule_display(
     start: date,
     end: date,
     title: str = "7-day goal plan",
+    goal_objective: str = "",
     tool_results: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Calendar-style JSON for `renderScheduleDisplay` in the web UI."""
@@ -52,6 +53,7 @@ def build_goal_plan_schedule_display(
         by_date[d.isoformat()] = _empty_day_row(datetime.combine(d, datetime.min.time()))
         d = date.fromordinal(d.toordinal() + 1)
 
+    objective_label = (goal_objective or "").strip()
     done = pending = skipped = 0
     for t in tasks:
         iso = str(t.get("task_date", ""))[:10]
@@ -73,15 +75,16 @@ def build_goal_plan_schedule_display(
         )
         task_title = (t.get("title") or "Task").strip()
         desc = (t.get("description") or "").strip()
-        by_date[iso]["slots"].append(
-            {
-                "time": when,
-                "title": task_title,
-                "description": desc,
-                "status": st,
-                "kind": "goal_task",
-            }
-        )
+        slot: dict[str, Any] = {
+            "time": when,
+            "title": task_title,
+            "description": desc,
+            "status": st,
+            "kind": "goal_task",
+        }
+        if objective_label:
+            slot["goal_objective"] = objective_label
+        by_date[iso]["slots"].append(slot)
 
     if tool_results:
         cal = build_schedule_display(
@@ -160,6 +163,43 @@ def format_progress_header(
         f"**{label}:** {prog['done']}/{prog['total']} done "
         f"({prog['percent']}%) · {prog['pending']} pending"
     )
+
+
+def format_plan_week_by_day(
+    tasks: list[dict[str, Any]],
+    *,
+    start: date,
+    end: date,
+    title: str = "Goal tasks (this plan)",
+) -> str:
+    """Every plan day from start→end; empty days show no tasks (matches calendar preview)."""
+    by_date: dict[str, list[dict[str, Any]]] = {}
+    for t in tasks:
+        d = str(t.get("task_date", ""))[:10]
+        by_date.setdefault(d, []).append(t)
+    lines = [title + ":", ""]
+    cur = start
+    while cur <= end:
+        iso = cur.isoformat()
+        day_label = cur.strftime("%A, %d %b")
+        lines.append(f"**{day_label}**")
+        day_tasks = by_date.get(iso, [])
+        if not day_tasks:
+            lines.append("  _No tasks scheduled._")
+        else:
+            for row in sorted(day_tasks, key=lambda x: int(x.get("sort_order") or 0)):
+                st, en = row.get("start_time"), row.get("end_time")
+                when = f"{_fmt_time(st)} – {_fmt_time(en)}" if st and en else "flexible"
+                status = _status_label(row.get("status"))
+                lines.append(
+                    f"  • [{status}] {(row.get('title') or 'Task').strip()} ({when})"
+                )
+        lines.append("")
+        cur += timedelta(days=1)
+    lines.append(
+        "_Ask about a specific day (e.g. **Wednesday tasks**) or use **my schedule** for calendar + free time._"
+    )
+    return "\n".join(lines).strip()
 
 
 def format_goal_tasks_brief(tasks: list[dict[str, Any]], *, title: str = "Goal tasks (this plan)") -> str:
@@ -406,7 +446,8 @@ def format_tasks_summary_reply(
         parts = [p for p in (header, body, hint) if p]
         return "\n\n".join(parts)
 
-    body = format_goal_tasks_brief(tasks)
+    week_tasks = all_tasks if all_tasks is not None else tasks
+    body = format_plan_week_by_day(week_tasks, start=start, end=end)
     hint = (
         f"Plan window: {start.isoformat()} → {end.isoformat()}. "
         "Click **Preview** below the message for the full week calendar view."

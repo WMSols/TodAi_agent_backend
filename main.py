@@ -19,24 +19,26 @@ if str(_root) not in sys.path:
 
 import uvicorn
 
-HOST = "0.0.0.0"
-PORT = 8000
+from todai.database.config import server_port
+
+HOST = os.environ.get("TODAI_HOST", "0.0.0.0")
 
 
 def main() -> None:
     use_reload = os.getenv("TODAI_RELOAD", "").strip().lower() in ("1", "true", "yes")
+    port = server_port()
 
     print("=" * 60, flush=True)
     print("  TodAI — keep this terminal open while browsing", flush=True)
-    print(f"  Open:  http://127.0.0.1:{PORT}/", flush=True)
-    print(f"         http://localhost:{PORT}/", flush=True)
+    print(f"  Open:  http://127.0.0.1:{port}/", flush=True)
+    print(f"         http://localhost:{port}/", flush=True)
     print("  Storage: Supabase (set SUPABASE_* in .env)", flush=True)
     print("=" * 60, flush=True)
 
     uvicorn.run(
         "todai.api.main:app",
         host=HOST,
-        port=PORT,
+        port=port,
         reload=use_reload,
         log_level=os.environ.get("TODAI_LOG_LEVEL", "info").lower(),
     )

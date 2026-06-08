@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TodAI — Goal Agent Debug</title>
+  <link rel="stylesheet" href="/static/goal-debug/goal-debug.css?v=5" />
+</head>
+<body>
+  <header>
+    <h1>Goal Agent Debug</h1>
+    <span class="sub">Execution traces from main app</span>
+    <span class="spacer"></span>
+    <a href="/">← Main app</a>
+    <label>
+      Plan
+      <select id="plan-select"></select>
+    </label>
+    <button type="button" id="btn-refresh-plans" title="Reload plan list">Plans</button>
+    <button type="button" id="btn-refresh-history" title="Reload traces now">Refresh</button>
+    <span id="live-indicator" class="live on" title="Auto-refresh every 3s">● live</span>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="tabs">
+        <button type="button" data-tab="routes" class="active">Routes</button>
+        <button type="button" data-tab="prompts">Prompts</button>
+      </div>
+      <div id="panel-routes">
+        <div class="panel-title">Goal routes</div>
+        <div class="list" id="route-list"></div>
+        <div class="route-detail-compact" id="route-detail-compact"></div>
+      </div>
+      <div id="panel-prompts" style="display:none" class="prompts-panel">
+        <div class="panel-title">LLM prompts (runtime editable)</div>
+        <div class="list" id="prompt-list"></div>
+        <div id="prompt-sidebar-preview" class="prompt-sidebar-preview" hidden>
+          <div class="panel-title">Full prompt</div>
+          <pre id="prompt-sidebar-text" class="prompt-readonly"></pre>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="history-panel">
+        <div class="history-head">
+          <div>
+            <h2>Execution history</h2>
+            <p class="hint">Every turn you send on the <strong>main Goal planner</strong> page appears here with router + Groq traces.</p>
+          </div>
+        </div>
+        <div id="session-summary" class="session-summary"></div>
+        <div id="trace-list" class="trace-list-main">
+          <div class="empty">Loading…</div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="inspector">
+      <div class="panel-title">Trace prompt viewer</div>
+      <div id="trace-prompt-viewer" class="trace-prompt-viewer">
+        <p id="trace-prompt-empty" class="trace-prompt-empty">
+          Click <strong>Prompt sent</strong> on any Groq step to open the full prompt in a popup.
+        </p>
+        <div id="trace-prompt-content" class="trace-prompt-content" hidden>
+          <div class="trace-prompt-head">
+            <h4 id="trace-prompt-phase">—</h4>
+            <button type="button" id="btn-open-catalog-prompt" class="link-btn" title="Open matching prompt in editor">Edit prompt →</button>
+          </div>
+          <div id="trace-prompt-messages"></div>
+        </div>
+      </div>
+
+      <div class="panel-title">Prompt editor</div>
+      <div class="prompt-editor">
+        <h3 id="prompt-title" style="margin:0 0 0.35rem;font-size:0.9rem">—</h3>
+        <p id="prompt-purpose" style="font-size:0.8rem;color:var(--muted);margin:0"></p>
+        <p id="prompt-intake" style="font-size:0.75rem;color:var(--muted);margin:0.25rem 0"></p>
+        <p id="prompt-file" style="font-size:0.72rem;font-family:var(--mono);color:var(--accent)"></p>
+        <p id="prompt-routes" style="font-size:0.75rem;color:var(--muted)"></p>
+        <p id="prompt-override-hint" style="font-size:0.75rem;color:var(--warn)"></p>
+        <textarea id="prompt-text" spellcheck="false"></textarea>
+        <div class="prompt-actions">
+          <button type="button" class="primary" id="btn-apply-prompt">Apply runtime override</button>
+          <button type="button" id="btn-reset-prompt">Reset to default</button>
+          <button type="button" id="btn-reset-all-prompts">Clear all overrides</button>
+        </div>
+      </div>
+
+      <div class="panel-title">Architecture</div>
+      <div class="pattern-box compact">
+        <h2 id="arch-title">—</h2>
+        <ul id="arch-steps"></ul>
+        <div class="pattern-flow" id="global-flow">
+          <span class="node">User</span><span class="arrow">→</span>
+          <span class="node">goal_router</span><span class="arrow">→</span>
+          <span class="node">handler</span><span class="arrow">→</span>
+          <span class="node">Groq</span><span class="arrow">→</span>
+          <span class="node">verify</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="status-bar" id="status-bar"></div>
+
+  <div id="prompt-modal" class="prompt-modal" hidden role="dialog" aria-modal="true" aria-labelledby="prompt-modal-title">
+    <div class="prompt-modal-backdrop" id="prompt-modal-backdrop"></div>
+    <div class="prompt-modal-dialog">
+      <header class="prompt-modal-header">
+        <div class="prompt-modal-head-text">
+          <h2 id="prompt-modal-title">Prompt</h2>
+          <p id="prompt-modal-subtitle"></p>
+        </div>
+        <button type="button" class="prompt-modal-close" id="prompt-modal-close" aria-label="Close" title="Close">×</button>
+      </header>
+      <div class="prompt-modal-body" id="prompt-modal-body"></div>
+    </div>
+  </div>
+
+  <script src="/static/goal-debug/goal-debug.js?v=5"></script>
+</body>
+</html>

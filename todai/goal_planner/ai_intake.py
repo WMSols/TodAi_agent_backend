@@ -11,35 +11,26 @@ from todai.agent.planner.llm import groq_chat_json
 from todai.goal_planner.interrogation import (
     confirmation_prompt,
     format_skip_days,
-    parse_confirmation,
     parse_skip_days,
-    try_apply_confirm_edits,
 )
 from todai.goal_planner.intake_validate import validate_intake_answer
+from todai.goal_planner.turn_normalize import apply_confirm_edits, normalize_confirmation
 
 logger = logging.getLogger(__name__)
 
 _INIT_SYSTEM = (
-    "You are TodAI goal intake. The user describes what they want to achieve.\n"
-    "Output JSON only:\n"
-    '{"goal_title": string, "user_notes": string, "analysis": string, '
-    '"clarification_question": {"id": string, "text": string}, '
-    '"defaults": {"objective": string, "difficulty": "easy|medium|hard", '
-    '"tasks_per_day": 1-5}}\n'
-    "goal_title: short label (3-8 words).\n"
-    "user_notes: their instructions (1-3 sentences).\n"
-    "clarification_question: ONE tailored question to clarify their 7-day outcome "
-    "(measurable target, scope, or focus). Max 25 words. Do NOT ask tasks/day, skip days, or daily minutes.\n"
-    "analysis: two sentences, max 25 words.\n"
-    "defaults.objective: specific 7-day outcome from their message.\n"
-    "Legacy: you may use questions array with one item instead of clarification_question."
+    "Goal intake from achievement text. JSON: "
+    '{"goal_title":string,"user_notes":string,"analysis":string,'
+    '"clarification_question":{"id":string,"text":string},'
+    '"defaults":{"objective":string,"difficulty":"easy|medium|hard","tasks_per_day":1-5}}\n'
+    "goal_title 3-8 words. ONE clarification Q on measurable 7-day outcome (≤18 words). "
+    "Do NOT ask tasks/day, skip days, or minutes — fixed Qs handle those."
 )
 
 _FINALIZE_SYSTEM = (
-    "Map goal intake Q&A into plan parameters. JSON only.\n"
-    '{"objective": string, "difficulty": "easy|medium|hard", "tasks_per_day": 1-5}\n'
-    "Honor explicit user numbers. Objective = specific 7-day outcome. "
-    "Do not invent daily minutes — timing is optional."
+    "Map intake Q&A to plan params. JSON: "
+    '{"objective":string,"difficulty":"easy|medium|hard","tasks_per_day":1-5}\n'
+    "Use explicit user numbers from Q&A; do not override tasks_per_day the user already gave."
 )
 
 _FIXED_TAIL_QUESTIONS = [
@@ -55,7 +46,7 @@ _FIXED_TAIL_QUESTIONS = [
         "text": (
             "**Question 3 of 3 — Skip days**\n"
             "Which weekdays should have **no tasks**? "
-            "Name them (e.g. **Saturday and Sunday**) or say **none** for every day."
+            "Name one or more (e.g. **Monday** or **Saturday and Sunday**) or say **none** for every day."
         ),
     },
 ]
@@ -242,7 +233,9 @@ def handle_ai_intake_turn(
     )
 
 
-def handle_ai_confirm(session: dict[str, Any], message: str) -> tuple[str, dict[str, Any]]:
+def handle_ai_confirm(
+    session: dict[str, Any], message: str, *, allow_groq: bool = True
+) -> tuple[str, dict[str, Any]]:
     """Confirm step for AI intake (yes → ready, no → restart, inline edits applied)."""
     answers = dict(session.get("answers") or {})
     ai = session.get("ai_intake") or {}
@@ -258,13 +251,28 @@ def handle_ai_confirm(session: dict[str, Any], message: str) -> tuple[str, dict[
     default_obj = str(default_obj).strip()
     goal_title = (session.get("title") or ai.get("goal_title") or "your goal").strip()
 
-    answers, ack = try_apply_confirm_edits(message, answers, default_objective=default_obj)
-    choice = parse_confirmation(message)
+    edit = apply_confirm_edits(
+        message,
+        answers,
+        goal_title=goal_title,
+        default_objective=default_obj,
+        allow_groq=allow_groq,
+    )
+    answers = edit.answers
+    ack = edit.ack
+    choice = normalize_confirmation(
+        message,
+        context={
+            "prompt_type": "build_plan_confirm",
+            "phase": "confirm",
+            "goal_title": goal_title,
+        },
+        allow_groq=allow_groq,
+    ).choice
 
     if ack:
         patch: dict[str, Any] = {"phase": "confirm", "answers": answers}
-        if choice == "yes":
-            return "", {**patch, "phase": "ready"}
+        # Setting edits always show preview first — never create on the same turn as an edit.
         return (
             f"Updated — {ack}\n\n{confirmation_prompt(answers, goal_title=goal_title)}\n\n"
             "Reply **yes** to build your 7-day task plan.",
@@ -285,7 +293,7 @@ def handle_ai_confirm(session: dict[str, Any], message: str) -> tuple[str, dict[
         )
     return (
         f"{confirmation_prompt(answers, goal_title=goal_title)}\n\n"
-        "Reply **yes** to build, or correct a setting (e.g. **1 task per day**, **skip weekends**).",
+        "Reply **yes** to build, or describe changes in plain language (you can update several settings at once).",
         {"phase": "confirm", "answers": answers},
     )
 
