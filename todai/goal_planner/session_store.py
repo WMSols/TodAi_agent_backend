@@ -350,6 +350,17 @@ class GoalPlanSessionStore:
         ).execute()
         return {"ok": True, "deleted": task_id}
 
+    def delete_goal_tasks_by_ids(self, task_ids: list[str], *, plan_id: str) -> dict[str, Any]:
+        """Delete specific goal tasks belonging to plan_id."""
+        removed: list[str] = []
+        for tid in task_ids:
+            row = self.get_goal_task(tid)
+            if not row or str(row.get("plan_id") or "") != plan_id:
+                continue
+            self.delete_goal_task(tid)
+            removed.append(tid)
+        return {"ok": True, "deleted": removed, "count": len(removed)}
+
     def list_user_goals(self) -> list[dict[str, Any]]:
         rows = (
             self._client.table("goals")

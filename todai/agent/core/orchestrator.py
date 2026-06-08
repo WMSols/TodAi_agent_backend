@@ -21,7 +21,11 @@ from todai.agent.core.context import (
     merged_write_context_message,
     groq_specialist_history,
 )
-from todai.agent.routing.preview_range import normalize_time_scope, resolve_preview_range_for_turn
+from todai.agent.routing.preview_range import (
+    align_router_time_scope,
+    normalize_time_scope,
+    resolve_preview_range_for_turn,
+)
 from todai.agent.routing.date_anchor import build_date_anchor
 from todai.agent.core.intents import dispatch
 from todai.agent.core.prefetch import resolve_and_prefetch
@@ -66,6 +70,7 @@ def orchestrate_turn(store: UserStore, *, user_id: str, message: str) -> ChatRes
             "today": date_anchor.get("today", {}).get("iso"),
             "mentioned_weekdays": date_anchor.get("mentioned_weekdays"),
             "weekday_candidates": date_anchor.get("weekday_candidates"),
+            "day_targets": date_anchor.get("day_targets"),
         }
     )
     server_snapshot = {
@@ -133,7 +138,13 @@ def orchestrate_turn(store: UserStore, *, user_id: str, message: str) -> ChatRes
         chat["state"] = ConversationState.REQUESTING_DATA.value
         store.write_chat(chat)
 
-    ts = normalize_time_scope(router_out.time_scope)
+    ts = align_router_time_scope(
+        message,
+        date_anchor,
+        route.value,
+        normalize_time_scope(router_out.time_scope),
+    )
+    router_out.time_scope = ts
     preview_range = None
     if route != AgentRoute.CHAT:
         preview_range = resolve_preview_range_for_turn(

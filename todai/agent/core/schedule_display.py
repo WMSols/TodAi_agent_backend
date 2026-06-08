@@ -311,6 +311,24 @@ def build_period_preview_reply(
     return f"Nothing on your calendar for **{label}**."
 
 
+def _grounded_day_schedule_line(
+    read_results: list[dict[str, Any]],
+    *,
+    day_iso: str,
+    label: str,
+) -> str:
+    blocks = _blocks_on_day(read_results, day_iso)
+    if not blocks:
+        return f"Nothing scheduled on {label}."
+    if len(blocks) == 1:
+        b = blocks[0]
+        blk_title = (b.get("title") or "Event").strip()
+        return f"On {label}: {blk_title} ({format_block_line(b)})."
+    titles = "; ".join((b.get("title") or "Event") for b in blocks[:4])
+    more = f" (+{len(blocks) - 4} more)" if len(blocks) > 4 else ""
+    return f"On {label}: {titles}{more}."
+
+
 def build_grounded_preview_reply(
     *,
     message: str,
@@ -318,13 +336,28 @@ def build_grounded_preview_reply(
     preview: PreviewRange,
 ) -> str | None:
     """
-    Deterministic reply for single-day schedule / free-day questions.
+    Deterministic reply for single-day or discrete multi-day schedule / free-day questions.
     Returns None when the specialist should answer (wide scope, free-time slots, etc.).
     """
+    kind = classify_preview_read(message)
+
+    if preview.scope_mode == "discrete_days" and preview.target_days:
+        if kind != PreviewReadKind.SCHEDULE:
+            return None
+        from datetime import date as date_cls
+
+        lines: list[str] = []
+        for day_iso in preview.target_days:
+            try:
+                label = date_cls.fromisoformat(day_iso[:10]).strftime("%A, %d %B %Y")
+            except ValueError:
+                label = day_iso
+            lines.append(_grounded_day_schedule_line(read_results, day_iso=day_iso, label=label))
+        return " ".join(lines)
+
     if preview.granularity != "day" or preview.date_from != preview.date_to:
         return None
 
-    kind = classify_preview_read(message)
     day_iso = preview.date_from
     label = preview.label or day_iso
 
@@ -339,13 +372,4 @@ def build_grounded_preview_reply(
     if kind != PreviewReadKind.SCHEDULE:
         return None
 
-    blocks = _blocks_on_day(read_results, day_iso)
-    if not blocks:
-        return f"Nothing scheduled on {label}."
-    if len(blocks) == 1:
-        b = blocks[0]
-        blk_title = (b.get("title") or "Event").strip()
-        return f"On {label}: {blk_title} ({format_block_line(b)})."
-    titles = "; ".join((b.get("title") or "Event") for b in blocks[:4])
-    more = f" (+{len(blocks) - 4} more)" if len(blocks) > 4 else ""
-    return f"On {label}: {titles}{more}."
+    return _grounded_day_schedule_line(read_results, day_iso=day_iso, label=label)

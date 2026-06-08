@@ -15,10 +15,16 @@ from todai.agent.routing.routing_guards import (
     is_plain_chat_message,
     should_redirect_to_goal_planner,
 )
+from todai.database.utils.dates import format_today_reply, is_today_question
 
 
 def handle(ctx: TurnContext) -> IntentResult:
     ctx.trace.append({"phase": "intent", "intent": "chat"})
+    if is_today_question(ctx.message):
+        today = (ctx.date_anchor or {}).get("today") or {}
+        if today.get("iso"):
+            ctx.trace.append({"phase": "today_reply", "source": "server"})
+            return IntentResult(reply_text=format_today_reply(today), operations=[])
     if should_redirect_to_goal_planner(ctx.message):
         ctx.trace.append({"phase": "goal_planner_redirect"})
         return IntentResult(reply_text=GOAL_PLANNER_REDIRECT_REPLY, operations=[])

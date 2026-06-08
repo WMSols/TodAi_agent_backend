@@ -202,6 +202,7 @@ class ToolSideEffect(str, Enum):
 class GetScheduleRangeArgs(BaseModel):
     from_: str = Field(..., alias="from")
     to: str
+    target_days: list[str] | None = None
 
     @field_validator("from_", "to")
     @classmethod
@@ -210,6 +211,18 @@ class GetScheduleRangeArgs(BaseModel):
         if len(parts) != 10 or parts[4] != "-" or parts[7] != "-":
             raise ValueError("expected YYYY-MM-DD")
         return parts
+
+    @field_validator("target_days")
+    @classmethod
+    def norm_target_days(cls, v: list[str] | None) -> list[str] | None:
+        if not v:
+            return None
+        out: list[str] = []
+        for raw in v:
+            parts = str(raw).strip()[:10]
+            if len(parts) == 10 and parts[4] == "-" and parts[7] == "-":
+                out.append(parts)
+        return out or None
 
 
 class GetActiveGoalsArgs(BaseModel):
@@ -292,7 +305,11 @@ def validate_tool_plan(
                     continue
                 if (b - a).days > MAX_RANGE_DAYS:
                     b = a + timedelta(days=MAX_RANGE_DAYS)
-                out.append({"tool": tool, "arguments": {"from": validated.from_[:10], "to": b.isoformat()}})
+                payload: dict[str, Any] = {"from": validated.from_[:10], "to": b.isoformat()}
+                if validated.target_days:
+                    payload["target_days"] = validated.target_days
+                    payload["scope_mode"] = "discrete_days"
+                out.append({"tool": tool, "arguments": payload})
             else:
                 validated = model.model_validate(args)
                 out.append({"tool": tool, "arguments": validated.model_dump(by_alias=True)})
@@ -322,6 +339,20 @@ def _daterange_bounds(from_s: str, to_s: str) -> tuple[date, date]:
     )
 
 
+def _filter_blocks_to_target_days(
+    blocks: list[dict[str, Any]],
+    target_days: list[str] | None,
+) -> list[dict[str, Any]]:
+    if not target_days:
+        return blocks
+    allowed = set(target_days)
+    return [
+        b
+        for b in blocks
+        if parse_iso_dt(str(b["start"])).date().isoformat() in allowed
+    ]
+
+
 def execute_read_tools(
     store: UserStore,
     tool_calls: list[dict[str, Any]],
@@ -341,15 +372,42 @@ def execute_read_tools(
                 p = GetScheduleRangeArgs.model_validate({**args, "from": args.get("from")})
                 a, b = _daterange_bounds(p.from_, p.to)
                 blocks = svc.get_events(a, b)
-                results.append({"tool": tool, "ok": True, "data": {"from": p.from_, "to": p.to, "blocks": blocks}})
+                blocks = _filter_blocks_to_target_days(blocks, p.target_days)
+                data: dict[str, Any] = {"from": p.from_, "to": p.to, "blocks": blocks}
+                if p.target_days:
+                    data["target_days"] = p.target_days
+                    data["scope_mode"] = "discrete_days"
+                results.append({"tool": tool, "ok": True, "data": data})
             elif tool == "get_free_time":
                 p = GetScheduleRangeArgs.model_validate({**args, "from": args.get("from")})
                 a, b = _daterange_bounds(p.from_, p.to)
-                results.append({"tool": tool, "ok": True, "data": svc.free_time_days(a, b)})
+                data = svc.free_time_days(a, b)
+                if p.target_days:
+                    allowed = set(p.target_days)
+                    data = {
+                        **data,
+                        "days": [d for d in (data.get("days") or []) if (d.get("date") or "")[:10] in allowed],
+                        "target_days": p.target_days,
+                        "scope_mode": "discrete_days",
+                    }
+                results.append({"tool": tool, "ok": True, "data": data})
             elif tool == "get_days_without_schedule":
                 p = GetScheduleRangeArgs.model_validate({**args, "from": args.get("from")})
                 a, b = _daterange_bounds(p.from_, p.to)
-                results.append({"tool": tool, "ok": True, "data": svc.days_without_schedule(a, b)})
+                data = svc.days_without_schedule(a, b)
+                if p.target_days:
+                    allowed = set(p.target_days)
+                    empty = data.get("days_without_schedule") or []
+                    data = {
+                        **data,
+                        "days_without_schedule": [
+                            d for d in empty if (d.get("date") or "")[:10] in allowed
+                        ],
+                        "count": len([d for d in empty if (d.get("date") or "")[:10] in allowed]),
+                        "target_days": p.target_days,
+                        "scope_mode": "discrete_days",
+                    }
+                results.append({"tool": tool, "ok": True, "data": data})
             elif tool == "analyze_progress":
                 goals = store.read_profile().get("goals", [])
                 results.append(

@@ -13,14 +13,18 @@ from todai.agent.routing.preview_range import (
     PreviewRange,
     PreviewReadKind,
     apply_preview_range_to_tools,
+    build_discrete_preview_targets,
     classify_preview_read,
     clamp_preview_range,
     message_has_month_phrase,
     message_implies_multi_weekday_scope,
     message_implies_single_day,
+    normalize_time_scope,
     pick_nearest_weekday_option,
+    preview_range_from_discrete_targets,
     refine_scope_for_message,
     resolve_preview_range_for_turn,
+    scope_from_mentioned_weekdays,
     scope_from_weekday_candidates,
     strip_router_tool_dates,
 )
@@ -28,6 +32,13 @@ from todai.agent.routing.date_anchor import single_day_iso_from_anchor
 from todai.database.storage import UserStore, parse_server_date
 
 _SPECIALTY_TOOLS = frozenset({"get_free_time", "get_days_without_schedule"})
+_DISCRETE_SCOPE_ROUTES = frozenset(
+    {
+        AgentRoute.SCHEDULE_PREVIEW,
+        AgentRoute.SCHEDULE_DELETE,
+        AgentRoute.SCHEDULE_WRITE,
+    }
+)
 
 
 def augment_preview_tool_calls(
@@ -98,6 +109,7 @@ def resolve_and_prefetch(
     time_scope: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], PreviewRange | None]:
     """Returns (tool_calls, read_results, errors, preview_range)."""
+    time_scope = normalize_time_scope(time_scope)
     router_tools = strip_router_tool_dates(router_tools)
     tool_calls, tool_errors = validate_tool_plan(router_tools, server_today=server_today)
     if not tool_calls and route != AgentRoute.CHAT:
@@ -123,11 +135,23 @@ def resolve_and_prefetch(
             today=today,
         )
 
+        if route in _DISCRETE_SCOPE_ROUTES:
+            discrete_targets = build_discrete_preview_targets(message, date_anchor, today)
+            discrete_scope = preview_range_from_discrete_targets(discrete_targets, today)
+            if discrete_scope:
+                resolved_scope = discrete_scope
+
         candidates = (date_anchor or {}).get("weekday_candidates") or {}
-        if message_implies_multi_weekday_scope(message, date_anchor):
-            multi = scope_from_weekday_candidates(date_anchor, today)
+        if route not in _DISCRETE_SCOPE_ROUTES and message_implies_multi_weekday_scope(
+            message, date_anchor
+        ):
+            multi = scope_from_mentioned_weekdays(date_anchor, today)
             if multi:
                 resolved_scope = multi
+            else:
+                multi = scope_from_weekday_candidates(date_anchor, today)
+                if multi:
+                    resolved_scope = multi
         elif len(candidates) == 1:
             iso = pick_nearest_weekday_option(next(iter(candidates.values())), today)
             if iso:
@@ -136,7 +160,12 @@ def resolve_and_prefetch(
                     resolved_scope = clamp_preview_range(day_range, today)
 
         if tool_calls and resolved_scope:
-            if message_implies_single_day(message, date_anchor) and not message_has_month_phrase(message):
+            if (
+                route not in _DISCRETE_SCOPE_ROUTES
+                or resolved_scope.scope_mode != "discrete_days"
+            ) and message_implies_single_day(message, date_anchor) and not message_has_month_phrase(
+                message
+            ):
                 iso = single_day_iso_from_anchor(date_anchor)
                 if iso:
                     day_range = _single_day_range(iso)

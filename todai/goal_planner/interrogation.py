@@ -6,35 +6,61 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
-StepId = Literal["objective", "difficulty", "tasks_per_day", "minutes_per_day"]
+StepId = Literal["objective", "tasks_per_day", "skip_days", "difficulty", "minutes_per_day"]
 
 STEPS: tuple[StepId, ...] = (
     "objective",
-    "difficulty",
     "tasks_per_day",
-    "minutes_per_day",
+    "skip_days",
 )
+
+DEFAULT_PLAN_MINUTES = 30
 
 QUESTIONS: dict[StepId, str] = {
     "objective": (
-        "**Question 1 of 4 — Objective**\n"
+        "**Question 1 of 3 — Your goal**\n"
         "What do you want to achieve in the next 7 days? "
-        "Write one clear goal (e.g. “Lose 2 kg” or “Practice Python 30 minutes daily”)."
-    ),
-    "difficulty": (
-        "**Question 2 of 4 — Difficulty**\n"
-        "How hard should this feel? Reply with exactly one word: **easy**, **medium**, or **hard**."
+        "Write one clear outcome (e.g. “Lose 3 kg” or “Learn basic algebra”)."
     ),
     "tasks_per_day": (
-        "**Question 3 of 4 — Tasks per day**\n"
-        "How many separate tasks per day? Send one number from **1** to **5** (example: `2`)."
+        "**Question 2 of 3 — Tasks per day**\n"
+        "How many separate tasks on each **active** day? Send one number from **1** to **5** (example: `2`)."
+    ),
+    "skip_days": (
+        "**Question 3 of 3 — Skip days**\n"
+        "Which weekdays should have **no tasks**? "
+        "Name them (e.g. **Saturday and Sunday**) or say **none** for every day."
+    ),
+    "difficulty": (
+        "How hard should this feel? Reply with exactly one word: **easy**, **medium**, or **hard**."
     ),
     "minutes_per_day": (
-        "**Question 4 of 4 — Time per day**\n"
         "How many minutes per day can you spend on this goal?\n"
-        "Examples: `45`, `1 hour`, or a range like `10 to 15 minutes`."
+        "Examples: `45`, `1 hour`, or `10 to 15 minutes`."
     ),
 }
+
+_WEEKDAY_PARSE: dict[str, int] = {
+    "monday": 0,
+    "mon": 0,
+    "tuesday": 1,
+    "tue": 1,
+    "tues": 1,
+    "wednesday": 2,
+    "wed": 2,
+    "thursday": 3,
+    "thu": 3,
+    "thur": 3,
+    "thurs": 3,
+    "friday": 4,
+    "fri": 4,
+    "saturday": 5,
+    "sat": 5,
+    "sunday": 6,
+    "sun": 6,
+}
+
+_WEEKDAY_LABELS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 _DIFFICULTY_MAP = {
     "easy": "easy",
@@ -99,39 +125,28 @@ def question_for_step(step: StepId, session: dict[str, Any] | None = None) -> st
 
     if step == "objective" and title:
         base = (
-            "**Question 1 of 4 — Objective**\n"
+            "**Question 1 of 3 — Your goal**\n"
             f"What do you want to achieve in the next 7 days for **{title}**? "
-            "Be specific (e.g. daily habits, measurable outcome).\n"
+            "Be specific (e.g. measurable outcome or daily habit).\n"
             "_Reply **ok** to use your goal title as the objective, or write your own._"
         )
         return f"{goal_line}\n\n{base}" if goal_line else base
 
-    if step == "difficulty" and title:
-        return (
-            (f"{goal_line}\n\n" if goal_line else "")
-            + f"**Question 2 of 4 — Difficulty**\n"
-            f"How challenging should **{title}** feel this week? "
-            "Reply with exactly one word: **easy**, **medium**, or **hard**."
-        )
-
     if step == "tasks_per_day" and title:
         return (
             (f"{goal_line}\n\n" if goal_line else "")
-            + f"**Question 3 of 4 — Tasks per day**\n"
-            f"How many separate tasks per day for **{title}**? "
+            + f"**Question 2 of 3 — Tasks per day**\n"
+            f"How many separate tasks per active day for **{title}**? "
             "Send one number from **1** to **5** (example: `2`)."
         )
 
-    if step == "minutes_per_day":
-        hint = f" for **{title}**" if title else ""
+    if step == "skip_days":
         return (
             (f"{goal_line}\n\n" if goal_line else "")
-            + f"**Question 4 of 4 — Time per day**\n"
-            f"How many minutes per day can you spend{hint}?\n"
-            "Examples: `45`, `1 hour`, or `10 to 15 minutes`."
+            + QUESTIONS["skip_days"]
         )
 
-    return QUESTIONS[step]
+    return QUESTIONS.get(step, str(step))
 
 
 def parse_answer(step: StepId, text: str, *, default_objective: str = "") -> ParseResult:
@@ -145,9 +160,87 @@ def parse_answer(step: StepId, text: str, *, default_objective: str = "") -> Par
         return _parse_difficulty(raw)
     if step == "tasks_per_day":
         return _parse_tasks_per_day(raw)
+    if step == "skip_days":
+        return parse_skip_days(raw)
     if step == "minutes_per_day":
         return _parse_minutes_per_day(raw)
     return ParseResult(valid=False, hint="Unknown question step.")
+
+
+def parse_skip_days(raw: str) -> ParseResult:
+    text = (raw or "").strip()
+    if not text:
+        return ParseResult(valid=False, hint="Say which days to skip, or **none** for every day.")
+    lower = text.lower()
+    if re.search(
+        r"\b(?:none|no skip|no days|every day|all days|all week|7 days|don't skip|do not skip)\b",
+        lower,
+    ):
+        return ParseResult(valid=True, parsed=[], display="No skip days (tasks every day)")
+    if re.search(r"\bweekends?\b", lower):
+        return ParseResult(valid=True, parsed=[5, 6], display="Skip Saturday & Sunday")
+    if re.search(r"\bweekdays?\b", lower) and "weekend" not in lower:
+        return ParseResult(valid=True, parsed=[0, 1, 2, 3, 4], display="Skip Monday–Friday")
+    found: set[int] = set()
+    for name, dow in _WEEKDAY_PARSE.items():
+        if re.search(rf"\b{re.escape(name)}\b", lower):
+            found.add(dow)
+    if found:
+        labels = ", ".join(_WEEKDAY_LABELS[d] for d in sorted(found))
+        return ParseResult(
+            valid=True,
+            parsed=sorted(found),
+            display=f"Skip {labels}",
+        )
+    return ParseResult(
+        valid=False,
+        hint="Name weekdays to skip (e.g. **Monday and Sunday**) or say **none**.",
+    )
+
+
+def format_skip_days(parsed: list[int] | None) -> str:
+    if not parsed:
+        return "No skip days (tasks every day)"
+    return "Skip " + ", ".join(_WEEKDAY_LABELS[d] for d in sorted(parsed))
+
+
+def plan_minutes_per_day(answers: dict[str, Any]) -> int:
+    slot = answers.get("minutes_per_day") or {}
+    if slot.get("valid") and slot.get("parsed") is not None:
+        try:
+            return max(5, min(480, int(slot["parsed"])))
+        except (TypeError, ValueError):
+            pass
+    return DEFAULT_PLAN_MINUTES
+
+
+def plan_difficulty(answers: dict[str, Any]) -> str:
+    slot = answers.get("difficulty") or {}
+    diff = str(slot.get("parsed") or "medium").lower()
+    return diff if diff in ("easy", "medium", "hard") else "medium"
+
+
+def plan_skip_days(answers: dict[str, Any]) -> list[int]:
+    slot = answers.get("skip_days") or {}
+    if not slot.get("valid"):
+        return []
+    parsed = slot.get("parsed")
+    if not isinstance(parsed, list):
+        return []
+    return [int(d) for d in parsed if isinstance(d, int) and 0 <= int(d) <= 6]
+
+
+def ensure_plan_defaults(answers: dict[str, Any]) -> dict[str, Any]:
+    """Fill internal defaults (difficulty, optional minutes) without extra user questions."""
+    out = dict(answers)
+    if not (out.get("difficulty") or {}).get("valid"):
+        out["difficulty"] = {
+            "valid": True,
+            "parsed": "medium",
+            "raw": "medium",
+            "display": "medium",
+        }
+    return out
 
 
 def _parse_objective(raw: str, *, default_objective: str) -> ParseResult:
@@ -186,6 +279,19 @@ def _parse_difficulty(raw: str) -> ParseResult:
 
 
 def _parse_tasks_per_day(raw: str) -> ParseResult:
+    lower = raw.lower()
+    _WORD_NUMBERS = {
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "a": 1,
+        "an": 1,
+    }
+    for word, n in _WORD_NUMBERS.items():
+        if re.search(rf"\b{re.escape(word)}\b", lower):
+            return ParseResult(valid=True, parsed=n)
     m = re.search(r"\b([1-5])\b", raw)
     if m:
         return ParseResult(valid=True, parsed=int(m.group(1)))
@@ -197,7 +303,7 @@ def _parse_tasks_per_day(raw: str) -> ParseResult:
         return ParseResult(valid=False, hint="Choose between **1 and 5** tasks per day.")
     return ParseResult(
         valid=False,
-        hint="Send a whole number from **1 to 5** (example: 2).",
+        hint="Send a whole number from **1 to 5** (example: 2 or *two tasks*).",
     )
 
 
@@ -286,15 +392,17 @@ def _answer_label(answers: dict[str, Any], step: str) -> str:
 
 def confirmation_prompt(answers: dict[str, Any], *, goal_title: str = "") -> str:
     title_line = f"**Goal:** {goal_title.strip()}\n" if (goal_title or "").strip() else ""
+    skip_label = _answer_label(answers, "skip_days")
+    if not skip_label or skip_label == "[]":
+        skip_label = format_skip_days(plan_skip_days(answers))
     return (
         "**Review your 7-day plan settings**\n"
         f"{title_line}"
         f"1. Objective: {_answer_label(answers, 'objective')}\n"
-        f"2. Difficulty: {_answer_label(answers, 'difficulty')}\n"
-        f"3. Tasks per day: {_answer_label(answers, 'tasks_per_day')}\n"
-        f"4. Time per day: {_answer_label(answers, 'minutes_per_day')}\n\n"
-        "Reply **yes** to create tasks in your free calendar slots.\n"
-        "To change something, say e.g. “change difficulty to hard”."
+        f"2. Tasks per active day: {_answer_label(answers, 'tasks_per_day')}\n"
+        f"3. Skip days: {skip_label}\n\n"
+        "Reply **yes** to create tasks in your calendar.\n"
+        "To change something, say e.g. **2 tasks per day** or **skip Monday and Sunday**."
     )
 
 
@@ -338,8 +446,26 @@ def try_apply_confirm_edits(
     acks: list[str] = []
     lower = text.lower()
 
+    if re.search(r"\b(skip|skipping|weekend|weekday)\b", lower) or any(
+        re.search(rf"\b{re.escape(name)}\b", lower) for name in _WEEKDAY_PARSE
+    ):
+        r = parse_skip_days(text)
+        if r.valid:
+            answers["skip_days"] = {
+                "valid": True,
+                "parsed": r.parsed,
+                "raw": text,
+                "display": r.display or format_skip_days(r.parsed if isinstance(r.parsed, list) else []),
+            }
+            acks.append(f"skip days → {answers['skip_days']['display']}")
+
     if re.search(r"\b(objective|goal)\b", lower) or (
-        len(text) > 12 and "task" not in lower and "minute" not in lower and "difficult" not in lower
+        len(text) > 12
+        and "task" not in lower
+        and "skip" not in lower
+        and not any(re.search(rf"\b{re.escape(name)}\b", lower) for name in _WEEKDAY_PARSE)
+        and "minute" not in lower
+        and "difficult" not in lower
     ):
         r = parse_answer("objective", text, default_objective=default_objective)
         if r.valid:
@@ -389,3 +515,22 @@ def try_apply_confirm_edits(
     if not acks:
         return answers, None
     return answers, "; ".join(acks)
+
+
+def is_confirm_settings_edit(message: str, *, default_objective: str = "") -> bool:
+    """True when confirm-phase message adjusts plan settings (not yes/no/delete)."""
+    if parse_confirmation(message) in ("yes", "no"):
+        return False
+    lower = (message or "").strip().lower()
+    if re.search(
+        r"\b(delete|remove|clear|drop|cancel)\b.*\b(goal|plan|tasks?)\b|"
+        r"\b(goal|plan|tasks?)\b.*\b(delete|remove|clear|drop)\b",
+        lower,
+    ):
+        return False
+    _, ack = try_apply_confirm_edits(
+        message,
+        {},
+        default_objective=default_objective or "7-day goal target",
+    )
+    return ack is not None

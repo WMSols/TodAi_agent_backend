@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from todai.database import user_store
@@ -23,14 +23,21 @@ from todai.goal_planner.interrogation import (
     answers_complete,
     confirmation_prompt,
     current_step,
+    ensure_plan_defaults,
+    format_skip_days,
     next_missing_step,
     parse_answer,
     parse_confirmation,
+    plan_difficulty,
+    plan_minutes_per_day,
+    plan_skip_days,
     question_for_step,
 )
 from todai.goal_planner.ai_intake import handle_ai_confirm, handle_ai_intake_turn, uses_ai_intake
 from todai.goal_planner.plan_resolver import plan_needs_task_setup
 from todai.goal_planner.session_store import GoalPlanSessionStore
+from todai.goal_planner.task_query import filter_tasks_by_dates, parse_task_summary_query
+from todai.goal_planner.task_summary_reply import compose_task_summary_reply
 
 from todai.agent.tools.calendar import execute_read_tools
 from todai.goal_planner.routing import normalize_router_tools
@@ -54,6 +61,10 @@ def orchestrate_goal_turn(
     session = store._load_plan_session(plan_id)
     if not session:
         session = {"phase": "interrogate", "answers": {}}
+
+    from todai.goal_planner.today_context import get_server_today_for_user
+
+    session["server_today"] = get_server_today_for_user(store.api_user_id)
 
     answers = session.setdefault("answers", {})
     phase = session.get("phase") or "interrogate"
@@ -102,9 +113,17 @@ def orchestrate_goal_turn(
 
     if route == "goal_interrogate" and setup_mode:
         if uses_ai_intake(session, ui_mode):
-            reply, patch = handle_ai_intake_turn(session, message)
+            reply, patch, intake_meta = handle_ai_intake_turn(
+                session, message, allow_groq=allow_groq
+            )
             session.update(patch)
-            trace.append({"phase": "goal_ai_intake", "intake_style": "ai"})
+            trace.append(
+                {
+                    "phase": "goal_ai_intake",
+                    "intake_style": "ai",
+                    **intake_meta,
+                }
+            )
             return reply, patch, route, trace
         reply, patch = _handle_interrogate(store, plan_id, session, message)
         return reply, patch, route, trace
@@ -129,6 +148,13 @@ def orchestrate_goal_turn(
     if route == "goal_create" and setup_mode:
         reply, patch, create_trace = _handle_create(store, plan_id, session)
         trace.extend(create_trace)
+        return reply, patch, route, trace
+
+    if route == "goal_tasks_summary":
+        reply, patch, sum_trace = _handle_tasks_summary(
+            store, plan_id, message, history=history
+        )
+        trace.extend(sum_trace)
         return reply, patch, route, trace
 
     if route == "goal_schedule_read":
@@ -174,7 +200,7 @@ def orchestrate_goal_turn(
         )
 
     reply = (
-        "I'll ask **4 short questions**, then build a 7-day task plan in your free time slots. "
+        "I'll ask **3 short questions**, then build a 7-day task plan (you can skip weekdays). "
         "Answer each question in order."
     )
     return reply, {}, "goal_chat", trace
@@ -287,7 +313,9 @@ def _ack(step: str, result: Any) -> str:
     if step == "difficulty":
         return f"Saved — difficulty: **{label}**"
     if step == "tasks_per_day":
-        return f"Saved — **{label}** task(s) per day"
+        return f"Saved — **{label}** task(s) per active day"
+    if step == "skip_days":
+        return f"Saved — {label}"
     if step == "minutes_per_day":
         return f"Saved — daily time: **{label}**"
     return "Saved."
@@ -342,6 +370,8 @@ def _step_from_change_request(message: str) -> str | None:
         return "difficulty"
     if "task" in t and "day" in t:
         return "tasks_per_day"
+    if "skip" in t or any(w in t for w in ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "weekend")):
+        return "skip_days"
     if "minute" in t or "hour" in t or "time" in t:
         return "minutes_per_day"
     return None
@@ -353,7 +383,7 @@ def _handle_create(
     session: dict[str, Any],
 ) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
     trace: list[dict[str, Any]] = []
-    answers = session.get("answers") or {}
+    answers = ensure_plan_defaults(session.get("answers") or {})
     if not answers_complete(answers):
         step = next_missing_step(answers) or STEPS[0]
         return (
@@ -370,9 +400,10 @@ def _handle_create(
     end = date.fromisoformat(str(plan_row["end_date"])[:10])
     goal_id = str(plan_row["goal_id"])
     objective = str(answers["objective"]["parsed"])
-    difficulty = str(answers["difficulty"]["parsed"])
+    difficulty = plan_difficulty(answers)
     tasks_per_day = int(answers["tasks_per_day"]["parsed"])
-    minutes_per_day = int(answers["minutes_per_day"]["parsed"])
+    minutes_per_day = plan_minutes_per_day(answers)
+    skip_days = plan_skip_days(answers)
 
     session["phase"] = "creating"
     store._save_plan_session(plan_id, session)
@@ -394,6 +425,7 @@ def _handle_create(
         start=start,
         days=days_count,
         free_time_data=free_data,
+        skip_days=skip_days,
     )
     task_rows, gen_err = enrich_tasks_with_descriptions(
         objective=objective,
@@ -447,12 +479,14 @@ def _handle_create(
         tool_results=tool_results,
     )
     prog = display.get("progress") or {}
-    time_label = _answer_label(answers, "minutes_per_day")
-
+    active_days = days_count - sum(
+        1 for i in range(days_count) if (start + timedelta(days=i)).weekday() in set(skip_days)
+    )
+    skip_label = format_skip_days(skip_days) if skip_days else "every day"
     reply = (
-        f"**Plan created** — {inserted} tasks over {days_count} days "
-        f"({start.isoformat()} → {end.isoformat()}).\n"
-        f"Settings: **{difficulty}**, {tasks_per_day} task(s)/day, {time_label}.\n"
+        f"**Plan created** — {inserted} tasks over **{active_days} active day(s)** "
+        f"({start.isoformat()} → {end.isoformat()}, {skip_label}).\n"
+        f"Settings: **{difficulty}**, {tasks_per_day} task(s)/active day.\n"
         f"Progress: {prog.get('done', 0)}/{prog.get('total', 0)} done.\n\n"
         "Your tasks are shown in the calendar panel below. "
         "Ask **show my plan** or **review goals** anytime."
@@ -463,6 +497,96 @@ def _handle_create(
         {"phase": "active", "answers": answers, "schedule_display": display},
         trace,
     )
+
+
+def _plan_goal_context(store: GoalPlanSessionStore, plan_id: str, plan_row: dict[str, Any]) -> tuple[str, str]:
+    goal_title = ""
+    objective = ""
+    gid = str(plan_row.get("goal_id") or "")
+    for g in store.list_user_goals():
+        if str(g.get("id")) == gid:
+            goal_title = str(g.get("title") or "").strip()
+            break
+    sess = store._load_plan_session(plan_id) or {}
+    answers = sess.get("answers") or {}
+    if answers.get("objective", {}).get("parsed"):
+        objective = str(answers["objective"]["parsed"]).strip()
+    elif plan_row.get("plan_notes"):
+        objective = str(plan_row.get("plan_notes") or "").strip()
+    return goal_title, objective
+
+
+def _handle_tasks_summary(
+    store: GoalPlanSessionStore,
+    plan_id: str,
+    message: str = "",
+    *,
+    history: list[dict[str, Any]] | None = None,
+) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
+    """List this plan's goal tasks only — no calendar events or free-time reads."""
+    from todai.database.utils.dates import format_today_reply, is_today_question
+    from todai.goal_planner.today_context import get_server_today_for_user
+
+    trace: list[dict[str, Any]] = [{"phase": "goal_tasks_summary"}]
+    if is_today_question(message):
+        today = get_server_today_for_user(store.api_user_id)
+        trace.append({"phase": "today_reply", "source": "server"})
+        return format_today_reply(today), {}, trace
+    plan_row = store.get_plan_row(plan_id)
+    if not plan_row:
+        return "Plan not found.", {}, trace
+
+    start = date.fromisoformat(str(plan_row["start_date"])[:10])
+    end = date.fromisoformat(str(plan_row["end_date"])[:10])
+    all_tasks = store.list_goal_tasks(plan_id)
+    trace.append({"phase": "tasks_loaded", "goal_tasks": len(all_tasks)})
+
+    query = parse_task_summary_query(message, start=start, end=end, tasks=all_tasks)
+    trace.append(
+        {
+            "phase": "task_query",
+            "scope": query.scope,
+            "dates": list(query.dates),
+            "day_label": query.day_label or None,
+            "matched": len(query.matched_tasks),
+        }
+    )
+
+    if query.scope == "task_match":
+        view_tasks = list(query.matched_tasks)
+    elif query.scope == "guidance":
+        if query.matched_tasks:
+            view_tasks = list(query.matched_tasks)
+        elif query.dates:
+            view_tasks = filter_tasks_by_dates(all_tasks, query.dates)
+        else:
+            view_tasks = all_tasks
+    elif query.scope == "day":
+        view_tasks = filter_tasks_by_dates(all_tasks, query.dates)
+    elif query.scope == "progress_only":
+        view_tasks = []
+    else:
+        view_tasks = all_tasks
+
+    display = build_goal_plan_schedule_display(all_tasks, start=start, end=end, tool_results=None)
+    goal_title, objective = _plan_goal_context(store, plan_id, plan_row)
+    sess = store._load_plan_session(plan_id) or {}
+    server_today = sess.get("server_today")
+    reply, source = compose_task_summary_reply(
+        message=message,
+        history=history,
+        query=query,
+        view_tasks=view_tasks,
+        all_tasks=all_tasks,
+        start=start,
+        end=end,
+        schedule_display=display,
+        goal_title=goal_title,
+        objective=objective,
+        server_today=server_today,
+    )
+    trace.append({"phase": "task_summary_reply", "source": source})
+    return reply, {"schedule_display": display}, trace
 
 
 def _handle_schedule_read(

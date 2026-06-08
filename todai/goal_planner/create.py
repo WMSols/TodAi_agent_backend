@@ -36,13 +36,19 @@ def build_tasks_from_free_time(
     start: date,
     days: int,
     free_time_data: dict[str, Any],
+    skip_days: list[int] | None = None,
 ) -> list[dict[str, Any]]:
-    """Place tasks into free gaps; deterministic (no LLM)."""
+    """Place tasks into free gaps; deterministic (no LLM). Skips weekdays in skip_days (0=Mon..6=Sun)."""
     per_task = max(5, minutes_per_day // max(1, tasks_per_day))
+    skip_set = set(skip_days or [])
     day_rows = {d["date"]: d for d in (free_time_data.get("days") or []) if d.get("date")}
     tasks: list[dict[str, Any]] = []
+    active_day_index = 0
     for offset in range(days):
         d = start + timedelta(days=offset)
+        if d.weekday() in skip_set:
+            continue
+        active_day_index += 1
         iso = d.isoformat()
         day_info = day_rows.get(iso) or {"date": iso, "free_gaps": []}
         gaps = _sorted_gaps(day_info.get("free_gaps") or [])
@@ -76,7 +82,7 @@ def build_tasks_from_free_time(
                     "start_time": gs.strftime("%H:%M:%S"),
                     "end_time": task_end.strftime("%H:%M:%S"),
                     "sort_order": n - 1,
-                    "_day_index": offset + 1,
+                    "_day_index": active_day_index,
                     "_task_num": n,
                 }
             )
@@ -91,7 +97,7 @@ def build_tasks_from_free_time(
                     "start_time": None,
                     "end_time": None,
                     "sort_order": n - 1,
-                    "_day_index": offset + 1,
+                    "_day_index": active_day_index,
                     "_task_num": n,
                 }
             )

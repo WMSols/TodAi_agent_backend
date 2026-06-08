@@ -386,6 +386,24 @@
       word-break: break-word;
     }
 
+    .schedule-preview-toggle { margin-top: 0.45rem; }
+    .schedule-preview-toggle button {
+      padding: 0.28rem 0.7rem;
+      border-radius: 6px;
+      border: 1px solid #3b4a63;
+      background: #243047;
+      color: #93c5fd;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .schedule-preview-toggle button:hover { background: #2d3d55; }
+    .schedule-preview-panel {
+      display: none;
+      margin-top: 0.4rem;
+    }
+    .schedule-preview-panel.open { display: block; }
+
     .schedule-display { margin-top: 0.5rem; }
     .schedule-display-title {
       font-size: 0.72rem;
@@ -2013,6 +2031,46 @@
       setMetaFromPayload(j || {});
     }
 
+    function scheduleDisplayHasPreviewContent(display) {
+      if (!display) return false;
+      const days = display.days || [];
+      if (days.some(function (d) {
+        return (d.slots || []).length > 0;
+      })) {
+        return true;
+      }
+      return !!(display.events && display.events.length);
+    }
+
+    function appendDeferredSchedulePreview(li, scheduleDisplay, hideTitle) {
+      if (!scheduleDisplayHasPreviewContent(scheduleDisplay)) return;
+      if (typeof renderScheduleDisplay !== "function") return;
+      const wrap = document.createElement("div");
+      wrap.className = "schedule-preview-toggle";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = "Preview";
+      btn.setAttribute("aria-expanded", "false");
+      const panel = document.createElement("div");
+      panel.className = "schedule-preview-panel";
+      btn.addEventListener("click", function () {
+        const open = panel.classList.toggle("open");
+        btn.textContent = open ? "Hide preview" : "Preview";
+        btn.setAttribute("aria-expanded", open ? "true" : "false");
+        if (open && !panel.dataset.rendered) {
+          panel.appendChild(
+            renderScheduleDisplay(scheduleDisplay, { hideTitle: !!hideTitle })
+          );
+          panel.dataset.rendered = "1";
+        }
+        const root = li.closest("ul");
+        if (root) root.scrollTop = root.scrollHeight;
+      });
+      wrap.appendChild(btn);
+      wrap.appendChild(panel);
+      li.appendChild(wrap);
+    }
+
     function appendChatLog(kind, text, extras, logRoot) {
       const root = logRoot || getActiveLogEl();
       const li = document.createElement("li");
@@ -2025,7 +2083,11 @@
         line.textContent = text || "";
         li.appendChild(line);
         if (extras && extras.scheduleDisplay && typeof renderScheduleDisplay === "function") {
-          li.appendChild(renderScheduleDisplay(extras.scheduleDisplay, { hideTitle: !!text }));
+          if (extras.deferSchedulePreview) {
+            appendDeferredSchedulePreview(li, extras.scheduleDisplay, !!text);
+          } else {
+            li.appendChild(renderScheduleDisplay(extras.scheduleDisplay, { hideTitle: !!text }));
+          }
         }
       }
       root.appendChild(li);
@@ -2105,13 +2167,11 @@
       }
       const reply = (j.reply_text || j.assistant_text || "").trim();
       const logRoot = isGoalMode() ? logGoalEl : null;
+      const goalScheduleExtras = isGoalMode()
+        ? { scheduleDisplay: j.schedule_display || null, deferSchedulePreview: true }
+        : { scheduleDisplay: j.schedule_display || null };
       if (reply) {
-        appendChatLog(
-          "assistant",
-          reply,
-          { scheduleDisplay: j.schedule_display || null },
-          logRoot
-        );
+        appendChatLog("assistant", reply, goalScheduleExtras, logRoot);
         if (isGoalMode() && j.plan_resolved && j.debug && j.debug.hint_plan_id) {
           const note = document.createElement("li");
           note.className = "system";
@@ -2119,7 +2179,7 @@
           logGoalEl.appendChild(note);
         }
       } else if (j.schedule_display) {
-        appendChatLog("assistant", "", { scheduleDisplay: j.schedule_display }, logRoot);
+        appendChatLog("assistant", "", goalScheduleExtras, logRoot);
       }
       if (turnUsage && (turnUsage.rate_limited || turnUsage.limit_hit)) {
         appendQuotaHint(logRoot, turnUsage);

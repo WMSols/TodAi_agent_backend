@@ -1,4 +1,4 @@
-"""Pydantic models for Swagger / OpenAPI — explicit inputs & outputs for Flutter & web."""
+"""Pydantic models for Swagger / OpenAPI."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------------------------------------------------------------------------
-# Auth — Flutter uses Firebase token; web uses POST /api/auth/login JWT
+# Auth
 # ---------------------------------------------------------------------------
 
 
@@ -53,8 +53,8 @@ class AuthTokenResponse(BaseModel):
 
 
 class AuthProvidersOut(BaseModel):
-    firebase: bool = Field(..., description="True when Firebase JWT verification is enabled (Flutter).")
-    local: bool = Field(..., description="True when username/password login is enabled (web).")
+    firebase: bool = Field(..., description="Firebase JWT enabled.")
+    local: bool = Field(..., description="Web username/password login enabled.")
 
 
 class AuthConfigResponse(BaseModel):
@@ -72,7 +72,7 @@ class AuthConfigResponse(BaseModel):
     auth_dev_allow_default: bool = Field(..., description="If true, missing token uses dev user `default` (server only).")
     storage: str = Field("supabase", description="Database backend label.")
     providers: AuthProvidersOut
-    firebase_project_id: str | None = Field(None, description="Firebase project id — Flutter app must match this project.")
+    firebase_project_id: str | None = Field(None, description="Firebase project id for the app.")
 
 
 class BootstrapResponse(BaseModel):
@@ -100,7 +100,7 @@ class HealthResponse(BaseModel):
     planner: str = Field(..., description="AI planner backend label")
     storage: str = Field(..., description="Storage backend, e.g. supabase")
     supabase_configured: bool
-    firebase_configured: bool = Field(..., description="True when Flutter Firebase JWT auth is enabled")
+    firebase_configured: bool = Field(..., description="Firebase JWT auth enabled")
     local_auth_configured: bool = Field(..., description="True when web username/password login is enabled")
     auth_required: bool = Field(..., description="True when clients must send Bearer token")
 
@@ -216,34 +216,116 @@ class CalendarEventDeleteResponse(BaseModel):
     schedule_version: int
 
 
-class GoalPlanApiResponse(BaseModel):
-    """POST /api/goals/plan/* — shared shape for start, message, list, get."""
+class _GoalPlanResponseBase(BaseModel):
+    """Base goal planner JSON. Extra fields may appear (dev traces)."""
 
-    model_config = ConfigDict(extra="allow", json_schema_extra={"example": {
-        "plan_id": "uuid",
-        "goal_id": "uuid",
-        "reply_text": "What time do you prefer for workouts?",
-        "assistant_text": "What time do you prefer for workouts?",
-        "phase": "interrogate",
-        "state": "idle",
-        "agent_mode": "goal_plan",
-    }})
+    model_config = ConfigDict(extra="allow")
 
-    plan_id: str | None = None
-    goal_id: str | None = None
-    reply_text: str | None = None
-    assistant_text: str | None = None
-    phase: str | None = None
-    state: str = "idle"
-    agent_mode: str | None = None
-    schedule_display: dict[str, Any] | None = None
-    plans: list[dict[str, Any]] | None = None
-    goals: list[dict[str, Any]] | None = None
-    messages: list[dict[str, Any]] | None = None
-    session: dict[str, Any] | None = None
+    plan_id: str | None = Field(None, description="7-day plan id — use in /message and GET /{plan_id}")
+    goal_id: str | None = Field(None, description="Parent goal id — not the same as plan_id")
+    reply_text: str | None = Field(None, description="AI text to show the user")
+    assistant_text: str | None = Field(None, description="Same as reply_text")
+    phase: str | None = Field(None, description="Plan step: interrogate, active, list, etc.")
+    state: str = Field("idle", description="Usually idle")
+    agent_mode: str | None = Field("goal_plan", description="Always goal_plan for this API group")
+    schedule_display: dict[str, Any] | None = Field(
+        None, description="Optional week calendar JSON for the UI",
+    )
+    plans: list[dict[str, Any]] | None = Field(
+        None, description="Only for GET /plans — list of week plans",
+    )
+    goals: list[dict[str, Any]] | None = Field(
+        None, description="Only for GET /plans — list of goals",
+    )
+    messages: list[dict[str, Any]] | None = Field(
+        None, description="Only for GET /{plan_id} — chat history",
+    )
+    session: dict[str, Any] | None = Field(
+        None, description="Only for GET /{plan_id} — plan session state",
+    )
     tool_trace: list[dict[str, Any]] = Field(default_factory=list)
     api_usage: dict[str, Any] | None = None
     debug: dict[str, Any] | None = None
+
+
+class GoalPlanStartResponse(_GoalPlanResponseBase):
+    """POST /api/goals/plan/start — new plan."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={
+            "example": {
+                "plan_id": "cd581499-d826-4452-8563-52590eca125b",
+                "goal_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                "reply_text": "What time of day works best for training?",
+                "phase": "interrogate",
+                "state": "idle",
+                "start_date": "2026-06-04",
+                "end_date": "2026-06-10",
+            }
+        },
+    )
+
+
+class GoalPlanMessageResponse(_GoalPlanResponseBase):
+    """POST /api/goals/plan/message — goal chat reply."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={
+            "example": {
+                "plan_id": "cd581499-d826-4452-8563-52590eca125b",
+                "reply_text": "Here are your tasks for this week…",
+                "phase": "active",
+                "state": "idle",
+                "schedule_display": {"schema": "todai.schedule.v1", "days": []},
+            }
+        },
+    )
+
+
+class GoalPlanListResponse(_GoalPlanResponseBase):
+    """GET /api/goals/plan/plans — list goals and plans (not a chat reply)."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={
+            "example": {
+                "phase": "list",
+                "plans": [
+                    {
+                        "id": "cd581499-d826-4452-8563-52590eca125b",
+                        "goal_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                        "goal_title": "Get fit",
+                        "start_date": "2026-06-04",
+                        "end_date": "2026-06-10",
+                        "progress": {"total": 21, "done": 1, "pending": 20, "percent": 4},
+                    }
+                ],
+                "goals": [{"id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890", "title": "Get fit"}],
+            }
+        },
+    )
+
+
+class GoalPlanGetResponse(_GoalPlanResponseBase):
+    """GET /api/goals/plan/{plan_id} — one plan + history."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={
+            "example": {
+                "plan_id": "cd581499-d826-4452-8563-52590eca125b",
+                "session": {"phase": "active"},
+                "messages": [{"role": "user", "content": "…"}, {"role": "assistant", "content": "…"}],
+                "schedule_display": {"schema": "todai.schedule.v1", "days": []},
+            }
+        },
+    )
+
+
+# Back-compat alias for code that still references GoalPlanApiResponse
+GoalPlanApiResponse = _GoalPlanResponseBase
 
 
 class GoalTaskPatchResponse(BaseModel):

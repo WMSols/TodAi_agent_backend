@@ -72,7 +72,7 @@ def _user_id(
     authorization: str | None = Header(
         None,
         alias="Authorization",
-        description="Bearer token — Firebase ID token (Flutter) or local JWT (web).",
+        description="Bearer token (Firebase or web JWT).",
     ),
 ) -> str:
     return require_user_with_fallback("default", authorization)

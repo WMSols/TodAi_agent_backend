@@ -127,6 +127,91 @@ def build_goal_plan_schedule_display(
     }
 
 
+def progress_counts(tasks: list[dict[str, Any]]) -> dict[str, int]:
+    done = pending = skipped = 0
+    for t in tasks:
+        st = _status_label(t.get("status"))
+        if st == "done":
+            done += 1
+        elif st == "skipped":
+            skipped += 1
+        else:
+            pending += 1
+    total = done + pending + skipped
+    percent = int((done / total) * 100) if total else 0
+    return {
+        "total": total,
+        "done": done,
+        "pending": pending,
+        "skipped": skipped,
+        "percent": percent,
+    }
+
+
+def format_progress_header(
+    tasks: list[dict[str, Any]],
+    *,
+    label: str = "Progress",
+) -> str:
+    prog = progress_counts(tasks)
+    if not prog["total"]:
+        return ""
+    return (
+        f"**{label}:** {prog['done']}/{prog['total']} done "
+        f"({prog['percent']}%) · {prog['pending']} pending"
+    )
+
+
+def format_goal_tasks_brief(tasks: list[dict[str, Any]], *, title: str = "Goal tasks (this plan)") -> str:
+    """Compact text summary — goal tasks only, no calendar or free-time blocks."""
+    if not tasks:
+        return "No goal tasks for this plan yet."
+    by_date: dict[str, list[dict[str, Any]]] = {}
+    for t in tasks:
+        d = str(t.get("task_date", ""))[:10]
+        by_date.setdefault(d, []).append(t)
+    lines = [title + ":", ""]
+    for d in sorted(by_date.keys()):
+        try:
+            dt = date.fromisoformat(d)
+            day_label = dt.strftime("%A, %d %b")
+        except ValueError:
+            day_label = d
+        lines.append(f"**{day_label}**")
+        for row in sorted(by_date[d], key=lambda x: int(x.get("sort_order") or 0)):
+            st, en = row.get("start_time"), row.get("end_time")
+            when = f"{_fmt_time(st)} – {_fmt_time(en)}" if st and en else "flexible"
+            status = _status_label(row.get("status"))
+            lines.append(f"  • [{status}] {(row.get('title') or 'Task').strip()} ({when})")
+        lines.append("")
+    lines.append(
+        "_Ask about a specific day (e.g. **Wednesday tasks**) or use **my schedule** for calendar + free time._"
+    )
+    return "\n".join(lines).strip()
+
+
+def format_goal_tasks_detail(tasks: list[dict[str, Any]], *, title: str = "Task details") -> str:
+    """One or more tasks with descriptions (for name-specific questions)."""
+    if not tasks:
+        return "No matching tasks found."
+    lines = [title + ":", ""]
+    for row in tasks:
+        st, en = row.get("start_time"), row.get("end_time")
+        when = f"{_fmt_time(st)} – {_fmt_time(en)}" if st and en else "flexible"
+        status = _status_label(row.get("status"))
+        d = str(row.get("task_date", ""))[:10]
+        try:
+            day_label = date.fromisoformat(d).strftime("%A, %d %b")
+        except ValueError:
+            day_label = d
+        lines.append(f"**{(row.get('title') or 'Task').strip()}** ({day_label}, {when}) · [{status}]")
+        desc = (row.get("description") or "").strip()
+        if desc:
+            lines.append(desc)
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
 def format_goal_tasks(tasks: list[dict[str, Any]], *, title: str = "Your 7-day goal tasks") -> str:
     if not tasks:
         return "No goal tasks found for this plan yet."
@@ -239,3 +324,92 @@ def format_plan_schedule_reply(
             "If you just created the plan, try refreshing the page."
         )
     return "\n".join(sections)
+
+
+def format_tasks_summary_reply(
+    *,
+    tasks: list[dict[str, Any]],
+    start: date,
+    end: date,
+    schedule_display: dict[str, Any] | None = None,
+    all_tasks: list[dict[str, Any]] | None = None,
+    scope: str = "week",
+    day_label: str = "",
+) -> str:
+    """Reply for goal_tasks_summary — progress + brief task list only."""
+    week_tasks = all_tasks if all_tasks is not None else tasks
+    prog = (schedule_display or {}).get("progress") or {}
+    header = ""
+    if scope == "day" and tasks:
+        header = format_progress_header(tasks, label=f"Progress ({day_label})" if day_label else "Progress")
+    elif scope == "week" and prog.get("total"):
+        header = (
+            f"**Progress:** {prog.get('done', 0)}/{prog['total']} done "
+            f"({prog.get('percent', 0)}%) · {prog.get('pending', 0)} pending"
+        )
+    elif scope == "week" and week_tasks:
+        header = format_progress_header(week_tasks)
+
+    if scope == "progress_only":
+        if not prog.get("total") and week_tasks:
+            prog = progress_counts(week_tasks)
+        if prog.get("total"):
+            return (
+                f"**Progress:** {prog.get('done', 0)}/{prog['total']} done "
+                f"({prog.get('percent', 0)}%) · {prog.get('pending', 0)} pending\n\n"
+                f"Plan window: {start.isoformat()} → {end.isoformat()}. "
+                "Ask **show my plan** or a day (e.g. **Wednesday tasks**) for the task list."
+            )
+        return "No tasks on this plan yet."
+
+    if scope == "guidance":
+        if not tasks:
+            return (
+                "Ask about a **specific task** or **day** (e.g. *help me with Wednesday's database task*) "
+                "and I'll walk you through it."
+            )
+        title = "Guidance"
+        if day_label:
+            title = f"Guidance for {day_label}"
+        elif len(tasks) == 1:
+            title = f"Guidance: {(tasks[0].get('title') or 'Task').strip()}"
+        body = format_goal_tasks_detail(tasks, title=title)
+        body += (
+            "\n\n_Ask a follow-up for more detail on any step. "
+            "Say **show my plan** to see the full week._"
+        )
+        parts = [p for p in (body,) if p]
+        return "\n\n".join(parts)
+
+    if scope == "task_match":
+        title = "Matching task" if len(tasks) == 1 else "Matching tasks"
+        body = format_goal_tasks_detail(tasks, title=title)
+        hint = (
+            f"Plan window: {start.isoformat()} → {end.isoformat()}. "
+            "Click **Preview** below the message for the full week calendar view."
+        )
+        parts = [p for p in (header, body, hint) if p]
+        return "\n\n".join(parts)
+
+    if scope == "day":
+        if not tasks:
+            return (
+                f"No tasks found for **{day_label or 'that day'}** "
+                f"(plan: {start.isoformat()} → {end.isoformat()})."
+            )
+        title = f"Tasks for {day_label}" if day_label else "Tasks for this day"
+        body = format_goal_tasks_brief(tasks, title=title)
+        hint = (
+            f"Plan window: {start.isoformat()} → {end.isoformat()}. "
+            "Click **Preview** below the message for the full week calendar view."
+        )
+        parts = [p for p in (header, body, hint) if p]
+        return "\n\n".join(parts)
+
+    body = format_goal_tasks_brief(tasks)
+    hint = (
+        f"Plan window: {start.isoformat()} → {end.isoformat()}. "
+        "Click **Preview** below the message for the full week calendar view."
+    )
+    parts = [p for p in (header, body, hint) if p]
+    return "\n\n".join(parts)

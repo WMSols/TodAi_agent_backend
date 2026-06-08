@@ -16,7 +16,13 @@ from todai.api.openapi_docs import (
     DOC_GOAL_MESSAGE,
     DOC_GOAL_START,
 )
-from todai.api.schemas import ErrorDetail, GoalPlanApiResponse
+from todai.api.schemas import (
+    ErrorDetail,
+    GoalPlanGetResponse,
+    GoalPlanListResponse,
+    GoalPlanMessageResponse,
+    GoalPlanStartResponse,
+)
 from todai.goal_planner.service import (
     get_goal_plan_state,
     list_goal_plans,
@@ -46,7 +52,7 @@ class GoalPlanMessageRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
     ui_mode: str = Field(
         "my_goals",
-        description="my_goals = conversational; new_goal = static 4-question intake only",
+        description="my_goals = chat with selected plan; new_goal = setup/intake tab. Invalid values become my_goals.",
     )
 
 
@@ -64,14 +70,14 @@ def _user_id(
     "/start",
     summary="Start goal plan",
     description=DOC_GOAL_START,
-    response_model=GoalPlanApiResponse,
+    response_model=GoalPlanStartResponse,
     responses={422: {"model": ErrorDetail}, 401: {"model": ErrorDetail}},
     openapi_extra={"security": [{"BearerAuth": []}]},
 )
 async def api_goal_plan_start(
     body: GoalPlanStartRequest,
     user_id: str = Depends(_user_id),
-) -> GoalPlanApiResponse:
+) -> GoalPlanStartResponse:
     achievement = (
         (body.achievement or "").strip()
         or (body.description or "").strip()
@@ -96,7 +102,7 @@ async def api_goal_plan_start(
             resp=resp,
             user_message=achievement,
         )
-        return GoalPlanApiResponse.model_validate(resp)
+        return GoalPlanStartResponse.model_validate(resp)
     except Exception:
         logger.exception("goal-plan/start failed user=%s", user_id)
         raise
@@ -104,16 +110,16 @@ async def api_goal_plan_start(
 
 @router.post(
     "/message",
-    summary="Goal planner chat",
+    summary="Goal chat (send message)",
     description=DOC_GOAL_MESSAGE,
-    response_model=GoalPlanApiResponse,
+    response_model=GoalPlanMessageResponse,
     responses={401: {"model": ErrorDetail}},
     openapi_extra={"security": [{"BearerAuth": []}]},
 )
 async def api_goal_plan_message(
     body: GoalPlanMessageRequest,
     user_id: str = Depends(_user_id),
-) -> GoalPlanApiResponse:
+) -> GoalPlanMessageResponse:
     try:
         ui_mode = body.ui_mode if body.ui_mode in ("my_goals", "new_goal") else "my_goals"
         resp = await asyncio.to_thread(
@@ -129,7 +135,7 @@ async def api_goal_plan_message(
             resp=resp,
             user_message=body.message,
         )
-        return GoalPlanApiResponse.model_validate(resp)
+        return GoalPlanMessageResponse.model_validate(resp)
     except Exception:
         logger.exception("goal-plan/message failed user=%s plan=%s", user_id, body.plan_id)
         raise
@@ -139,22 +145,22 @@ async def api_goal_plan_message(
     "/plans",
     summary="List goal plans",
     description=DOC_GOAL_LIST,
-    response_model=GoalPlanApiResponse,
+    response_model=GoalPlanListResponse,
     responses={401: {"model": ErrorDetail}},
     openapi_extra={"security": [{"BearerAuth": []}]},
 )
 async def api_goal_plans_list(
     user_id: str = Depends(_user_id),
-) -> GoalPlanApiResponse:
+) -> GoalPlanListResponse:
     result = await asyncio.to_thread(list_goal_plans, user_id)
-    return GoalPlanApiResponse.model_validate(result)
+    return GoalPlanListResponse.model_validate(result)
 
 
 @router.get(
     "/{plan_id}",
-    summary="Get goal plan state",
+    summary="Get one plan (history + state)",
     description=DOC_GOAL_GET,
-    response_model=GoalPlanApiResponse,
+    response_model=GoalPlanGetResponse,
     responses={401: {"model": ErrorDetail}},
     openapi_extra={"security": [{"BearerAuth": []}]},
 )
@@ -162,11 +168,11 @@ async def api_goal_plan_get(
     plan_id: str = Path(..., description="Plan UUID from GET /plans or POST /start"),
     include_messages: bool = Query(True, description="Include chat history when true"),
     user_id: str = Depends(_user_id),
-) -> GoalPlanApiResponse:
+) -> GoalPlanGetResponse:
     result = await asyncio.to_thread(
         get_goal_plan_state,
         user_id,
         plan_id,
         include_messages=include_messages,
     )
-    return GoalPlanApiResponse.model_validate(result)
+    return GoalPlanGetResponse.model_validate(result)

@@ -1,4 +1,4 @@
-"""Attach Bearer security scheme and Flutter guide to generated OpenAPI schema."""
+"""Attach Bearer security scheme to OpenAPI schema."""
 
 from __future__ import annotations
 

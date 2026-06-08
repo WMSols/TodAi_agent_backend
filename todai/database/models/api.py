@@ -8,18 +8,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChatRequest(BaseModel):
-    """Send a message to the calendar AI agent."""
+    """POST /api/chat — calendar AI (not goals)."""
 
     model_config = ConfigDict(json_schema_extra={"example": {
-        "user_id": "default",
         "message": "Show my schedule for next week",
     }})
 
     user_id: str = Field(
         "default",
-        description="Ignored when Authorization Bearer token is present. Use `default` only in dev sandbox mode.",
+        description="Ignored when Bearer token is sent.",
     )
-    message: str = Field(..., min_length=1, max_length=8000, description="User message in natural language.")
+    message: str = Field(..., min_length=1, max_length=8000, description="What the user typed.")
 
 
 class ResetRequest(BaseModel):
@@ -30,7 +29,7 @@ class ResetRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    """Web-only account creation. Flutter users register via Firebase, not this endpoint."""
+    """Web-only registration."""
 
     model_config = ConfigDict(json_schema_extra={"example": {
         "display_name": "Ali Khan",
@@ -53,7 +52,7 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    """Web-only login. Flutter uses Firebase ID token instead."""
+    """Web-only login."""
 
     model_config = ConfigDict(json_schema_extra={"example": {
         "username": "alikhan",
@@ -70,7 +69,7 @@ class LoginRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    """AI agent reply — includes optional structured schedule for UI rendering."""
+    """POST /api/chat response."""
 
     model_config = ConfigDict(json_schema_extra={"example": {
         "assistant_text": "Here is your week…",
@@ -79,22 +78,22 @@ class ChatResponse(BaseModel):
         "schedule_display": {"schema": "todai.schedule.v1", "days": []},
     }})
 
-    assistant_text: str = Field(..., description="Plain-text reply shown to the user.")
-    state: str = Field(..., description="Agent FSM state: idle | analyzing | requesting_data | error")
-    schedule_version: int = Field(..., description="Increments when calendar data changes.")
-    pending_proposal_id: str | None = Field(None, description="Set when agent awaits confirm/cancel.")
+    assistant_text: str = Field(..., description="**Show this** to the user.")
+    state: str = Field(..., description="idle | analyzing | requesting_data | error")
+    schedule_version: int = Field(..., description="Bigger number = calendar changed, refresh UI")
+    pending_proposal_id: str | None = Field(None, description="User must confirm a change when set")
     agent_mode: str | None = None
-    reply_text: str | None = Field(None, description="Same as assistant_text (legacy alias).")
+    reply_text: str | None = Field(None, description="Same as assistant_text")
     suggested_action: str | None = None
     agent_state: str | None = None
     schedule_display: dict[str, Any] | None = Field(
         None,
-        description="Structured calendar JSON (`todai.schedule.v1`) for rich UI — may include goal tasks.",
+        description="Optional JSON to draw calendar in the app",
     )
-    tool_trace: list[dict[str, Any]] = Field(default_factory=list, description="Debug: tools invoked this turn.")
+    tool_trace: list[dict[str, Any]] = Field(default_factory=list)
     validator_errors: list[dict[str, Any]] = Field(default_factory=list)
     debug: dict[str, Any] = Field(default_factory=dict)
-    api_usage: dict[str, Any] | None = Field(None, description="Groq usage snapshot for this turn.")
+    api_usage: dict[str, Any] | None = None
 
     def model_post_init(self, __context: Any) -> None:
         if self.reply_text is None:

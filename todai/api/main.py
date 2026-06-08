@@ -113,7 +113,7 @@ def health() -> HealthResponse:
 @app.get(
     "/api/auth/config",
     tags=["auth"],
-    summary="Auth config (Flutter: call on startup)",
+    summary="Auth config",
     description=DOC_AUTH_CONFIG,
     response_model=AuthConfigResponse,
 )
@@ -162,7 +162,7 @@ async def api_auth_login(body: LoginRequest) -> AuthTokenResponse:
 @app.post(
     "/api/auth/bootstrap",
     tags=["auth"],
-    summary="Bootstrap user profile (Flutter: after first login)",
+    summary="Bootstrap user profile",
     description=DOC_AUTH_BOOTSTRAP,
     response_model=BootstrapResponse,
     responses={401: {"model": ErrorDetail}},

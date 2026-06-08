@@ -19,11 +19,13 @@ _CHAT_SYSTEM = (
     "You are TodAI, a friendly goal-planning coach. The user has a 7-day goal week plan.\n"
     "Reply with JSON only: {\"replyText\": string}\n"
     "Be natural and concise (1-4 sentences). Answer greetings and small talk warmly.\n"
-    "Use PLAN_SNAPSHOT for context. Suggest concrete next steps when helpful:\n"
+    "Use PLAN_SNAPSHOT for context. For today's date/weekday use ONLY PLAN_SNAPSHOT.server_today "
+    "(iso, weekday, label) — never guess.\n"
+    "Suggest concrete next steps when helpful:\n"
     "- **show my plan** — tasks for this week\n"
     "- **my schedule** — calendar + goal tasks\n"
     "- **review goals** — all goals and progress\n"
-    "- If PLAN_SNAPSHOT.needs_setup is true, guide them through the 4 setup questions in this chat "
+    "- If PLAN_SNAPSHOT.needs_setup is true, guide them through the **3 setup questions** on this tab "
     "(difficulty, tasks/day, minutes) — do not tell them to switch tabs.\n"
     "Do NOT perform deletes or claim tasks were changed; tell them to ask to delete or edit.\n"
     "No markdown code fences inside JSON."
@@ -58,8 +60,11 @@ def _plan_snapshot(store: GoalPlanSessionStore, plan_id: str) -> dict[str, Any]:
     sess = store._load_plan_session(plan_id) or {}
     needs_setup = plan_needs_task_setup(store, plan_id, sess)
 
+    from todai.goal_planner.today_context import get_server_today_for_user
+
     return {
         "plan_id": plan_id,
+        "server_today": sess.get("server_today") or get_server_today_for_user(store.api_user_id),
         "goal_title": goal_title,
         "goal_description": next(
             (str(g.get("description") or "") for g in goals if str(g.get("id")) == gid),
@@ -103,7 +108,7 @@ def handle_goal_chat(
 
     if ui_mode == "new_goal" and phase in ("interrogate", "confirm", "ready"):
         return (
-            "I'm here for the **4 setup questions** on this tab. "
+            "I'm here for the **3 setup questions** on this tab. "
             "For open conversation, switch to **My goals** — or answer the question above.",
             {},
             trace,
@@ -115,6 +120,14 @@ def handle_goal_chat(
             {},
             trace,
         )
+
+    from todai.database.utils.dates import format_today_reply, is_today_question
+    from todai.goal_planner.today_context import get_server_today_for_user
+
+    if is_today_question(message):
+        today = get_server_today_for_user(store.api_user_id)
+        trace.append({"phase": "today_reply", "source": "server"})
+        return format_today_reply(today), {}, trace
 
     snapshot = _plan_snapshot(store, plan_id)
     reply = _groq_chat_reply(message, history, snapshot)

@@ -10,57 +10,63 @@ from todai.agent.planner.groq_config import GROQ_API_KEY
 from todai.agent.planner.llm import groq_chat_json
 from todai.goal_planner.interrogation import (
     confirmation_prompt,
+    format_skip_days,
     parse_confirmation,
+    parse_skip_days,
     try_apply_confirm_edits,
 )
+from todai.goal_planner.intake_validate import validate_intake_answer
 
 logger = logging.getLogger(__name__)
 
 _INIT_SYSTEM = (
-    "You are TodAI goal intake. The user describes what they want to achieve (no title yet).\n"
+    "You are TodAI goal intake. The user describes what they want to achieve.\n"
     "Output JSON only:\n"
     '{"goal_title": string, "user_notes": string, "analysis": string, '
-    '"questions": [{"id": string, "text": string}], '
+    '"clarification_question": {"id": string, "text": string}, '
     '"defaults": {"objective": string, "difficulty": "easy|medium|hard", '
-    '"tasks_per_day": 1-5, "minutes_per_day": number}}\n'
-    "goal_title: short label for the goal (3-8 words), e.g. Learn Python basics.\n"
-    "user_notes: preserve their instructions as plan notes (1-3 sentences).\n"
-    "Ask 3-5 tailored questions from their words — not a generic form.\n"
-    "Each question: two sentences, max 25 words. Cover outcome, schedule, daily capacity.\n"
-    "analysis: two sentences, max 25 words — show you understood them.\n"
-    "defaults.objective: specific 7-day outcome aligned with goal_title and user_notes.\n"
+    '"tasks_per_day": 1-5}}\n'
+    "goal_title: short label (3-8 words).\n"
+    "user_notes: their instructions (1-3 sentences).\n"
+    "clarification_question: ONE tailored question to clarify their 7-day outcome "
+    "(measurable target, scope, or focus). Max 25 words. Do NOT ask tasks/day, skip days, or daily minutes.\n"
+    "analysis: two sentences, max 25 words.\n"
+    "defaults.objective: specific 7-day outcome from their message.\n"
+    "Legacy: you may use questions array with one item instead of clarification_question."
 )
 
 _FINALIZE_SYSTEM = (
     "Map goal intake Q&A into plan parameters. JSON only.\n"
-    '{"objective": string, "difficulty": "easy|medium|hard", '
-    '"tasks_per_day": 1-5, "minutes_per_day": number}\n'
-    "Honor explicit user numbers. Objective = specific 7-day outcome for their goal domain. "
-    "Tasks will be generated day-by-day toward that objective."
+    '{"objective": string, "difficulty": "easy|medium|hard", "tasks_per_day": 1-5}\n'
+    "Honor explicit user numbers. Objective = specific 7-day outcome. "
+    "Do not invent daily minutes — timing is optional."
 )
 
-_FALLBACK_QUESTIONS = [
+_FIXED_TAIL_QUESTIONS = [
     {
-        "id": "outcome",
+        "id": "tasks_per_day",
         "text": (
-            "**Question 1** — What specific outcome do you want in the next 7 days "
-            "(measurable if possible)?"
+            "**Question 2 of 3 — Tasks per day**\n"
+            "How many separate tasks on each **active** day? Reply **1** to **5**."
         ),
     },
     {
-        "id": "schedule",
+        "id": "skip_days",
         "text": (
-            "**Question 2** — How many days per week can you work on this, and "
-            "roughly how many minutes per day?"
-        ),
-    },
-    {
-        "id": "intensity",
-        "text": (
-            "**Question 3** — How intense should this week feel: **easy**, **medium**, or **hard**?"
+            "**Question 3 of 3 — Skip days**\n"
+            "Which weekdays should have **no tasks**? "
+            "Name them (e.g. **Saturday and Sunday**) or say **none** for every day."
         ),
     },
 ]
+
+_FALLBACK_CLARIFICATION = {
+    "id": "outcome",
+    "text": (
+        "**Question 1 of 3 — Your goal**\n"
+        "What specific outcome do you want in the next 7 days (measurable if possible)?"
+    ),
+}
 
 
 def init_ai_intake(
@@ -81,14 +87,13 @@ def _init_from_achievement(achievement: str, *, allow_groq: bool = True) -> tupl
     achievement = (achievement or "").strip()
     payload = {"achievement": achievement}
     analysis = ""
-    questions = list(_FALLBACK_QUESTIONS)
+    questions = _build_intake_questions([_FALLBACK_CLARIFICATION])
     goal_title = _fallback_title(achievement)
     user_notes = achievement
     defaults = {
         "objective": achievement or "7-day goal",
         "difficulty": "medium",
         "tasks_per_day": 1,
-        "minutes_per_day": 45,
     }
 
     if GROQ_API_KEY and achievement and allow_groq:
@@ -106,7 +111,9 @@ def _init_from_achievement(achievement: str, *, allow_groq: bool = True) -> tupl
             if parsed:
                 analysis = parsed.get("analysis") or analysis
                 if parsed.get("questions"):
-                    questions = parsed["questions"][:6]
+                    questions = _build_intake_questions(parsed["questions"])
+                elif parsed.get("clarification_question"):
+                    questions = _build_intake_questions([parsed["clarification_question"]])
                 if parsed.get("defaults"):
                     defaults = {**defaults, **parsed["defaults"]}
                 if parsed.get("goal_title"):
@@ -126,6 +133,7 @@ def _init_from_achievement(achievement: str, *, allow_groq: bool = True) -> tupl
         "analysis": analysis,
         "questions": questions,
         "answers": {},
+        "parsed_answers": {},
         "index": 0,
         "defaults": defaults,
         "goal_title": goal_title,
@@ -152,37 +160,85 @@ def _fallback_title(achievement: str) -> str:
     return (t[:80] + "…") if len(t) > 80 else (t or "New goal")
 
 
-def handle_ai_intake_turn(session: dict[str, Any], message: str) -> tuple[str, dict[str, Any]]:
-    """Advance AI intake: store answer, ask next question, or move to confirm."""
-    ai = session.get("ai_intake") or {}
+def handle_ai_intake_turn(
+    session: dict[str, Any],
+    message: str,
+    *,
+    allow_groq: bool = True,
+) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    """Advance AI intake: validate answer, save only on ok, then next question or confirm."""
+    ai = dict(session.get("ai_intake") or {})
     questions: list[dict[str, Any]] = ai.get("questions") or []
     answers_map: dict[str, str] = dict(ai.get("answers") or {})
     idx = int(ai.get("index") or 0)
     text = (message or "").strip()
+    meta: dict[str, Any] = {}
 
     if not questions:
         ach = session.get("achievement") or session.get("description") or ""
-        return init_ai_intake(ach)
+        reply, patch = init_ai_intake(ach, allow_groq=allow_groq)
+        return reply, patch, meta
+
+    if idx < len(questions) and not text:
+        qtext = str(questions[idx].get("text") or "").strip()
+        hint = "Please send a short answer — I can't use an empty message."
+        reply = f"{hint}\n\n{qtext}" if qtext else hint
+        meta["validate_status"] = "aborted"
+        meta["validate_source"] = "local"
+        return reply, {"phase": "interrogate", "ai_intake": ai}, meta
 
     if idx < len(questions) and text:
-        qid = str(questions[idx].get("id") or f"q{idx}")
+        current_q = questions[idx]
+        qtext = str(current_q.get("text") or "").strip()
+        goal_title = (session.get("title") or ai.get("goal_title") or "").strip()
+        default_obj = goal_title or (session.get("achievement") or session.get("description") or "")
+        validation = validate_intake_answer(
+            question=current_q,
+            answer=text,
+            goal_title=goal_title,
+            default_objective=default_obj,
+            allow_groq=allow_groq,
+        )
+        meta["validate_status"] = validation.status
+        meta["validate_source"] = validation.source
+        if validation.parsed_value is not None:
+            meta["parsed_value"] = validation.parsed_value
+
+        if validation.status == "aborted":
+            reply = validation.reply_text
+            if qtext and qtext not in reply:
+                reply = f"{reply}\n\n{qtext}"
+            return reply, {"phase": "interrogate", "ai_intake": ai}, meta
+
+        qid = str(current_q.get("id") or f"q{idx}")
         answers_map[qid] = text
+        parsed_answers: dict[str, Any] = dict(ai.get("parsed_answers") or {})
+        if validation.parsed_value is not None:
+            parsed_answers[qid] = validation.parsed_value
+        ai["parsed_answers"] = parsed_answers
         idx += 1
         ai["answers"] = answers_map
         ai["index"] = idx
 
+        if idx < len(questions):
+            next_q = str(questions[idx].get("text") or "Next question:")
+            reply = f"{validation.reply_text}\n\n{next_q}"
+            return reply, {"phase": "interrogate", "ai_intake": ai}, meta
+
     if idx < len(questions):
         next_q = questions[idx].get("text") or "Next question:"
-        reply = f"Got it.\n\n{next_q}"
-        return reply, {"phase": "interrogate", "ai_intake": ai}
+        return next_q, {"phase": "interrogate", "ai_intake": ai}, meta
 
-    structured = finalize_ai_answers(session)
+    session_with_ai = {**session, "ai_intake": ai}
+    structured = finalize_ai_answers(session_with_ai, allow_groq=allow_groq)
     session["answers"] = structured
     session["phase"] = "confirm"
     title = (session.get("title") or ai.get("goal_title") or "your goal").strip()
+    meta["validate_status"] = "complete"
     return (
         confirmation_prompt(structured, goal_title=title),
         {"phase": "confirm", "answers": structured, "ai_intake": ai},
+        meta,
     )
 
 
@@ -221,6 +277,7 @@ def handle_ai_confirm(session: dict[str, Any], message: str) -> tuple[str, dict[
         ai = session.get("ai_intake") or {}
         ai["index"] = 0
         ai["answers"] = {}
+        ai["parsed_answers"] = {}
         first = (ai.get("questions") or [{}])[0].get("text", "Let's try again.")
         return (
             "No problem — let's adjust.\n\n" + first,
@@ -228,12 +285,12 @@ def handle_ai_confirm(session: dict[str, Any], message: str) -> tuple[str, dict[
         )
     return (
         f"{confirmation_prompt(answers, goal_title=goal_title)}\n\n"
-        "Reply **yes** to build, or correct a setting (e.g. **1 task per day**, **60 minutes**).",
+        "Reply **yes** to build, or correct a setting (e.g. **1 task per day**, **skip weekends**).",
         {"phase": "confirm", "answers": answers},
     )
 
 
-def finalize_ai_answers(session: dict[str, Any]) -> dict[str, Any]:
+def finalize_ai_answers(session: dict[str, Any], *, allow_groq: bool = True) -> dict[str, Any]:
     """Convert AI Q&A + defaults into validated answers dict for task generation."""
     ai = session.get("ai_intake") or {}
     defaults = dict(ai.get("defaults") or {})
@@ -245,7 +302,7 @@ def finalize_ai_answers(session: dict[str, Any]) -> dict[str, Any]:
     ]
 
     params = dict(defaults)
-    if GROQ_API_KEY and qa_lines:
+    if GROQ_API_KEY and qa_lines and allow_groq:
         try:
             raw = groq_chat_json(
                 [
@@ -271,15 +328,80 @@ def finalize_ai_answers(session: dict[str, Any]) -> dict[str, Any]:
             )
             if isinstance(raw, dict):
                 params.update(
-                    {k: raw[k] for k in ("objective", "difficulty", "tasks_per_day", "minutes_per_day") if k in raw}
+                    {
+                        k: raw[k]
+                        for k in ("objective", "difficulty", "tasks_per_day")
+                        if k in raw
+                    }
                 )
         except Exception as e:
             logger.warning("goal intake finalize Groq failed: %s", e)
+
+    params.update(_params_from_intake_answers(ai))
 
     return _answers_from_params(
         params,
         fallback_objective=achievement or goal_title or "7-day goal",
     )
+
+
+def _params_from_intake_answers(ai: dict[str, Any]) -> dict[str, Any]:
+    """Extract structured fields from AI-verified parsed answers (fallback: re-parse raw text)."""
+    out: dict[str, Any] = {}
+    parsed = ai.get("parsed_answers") or {}
+    answers = ai.get("answers") or {}
+    questions: list[dict[str, Any]] = ai.get("questions") or []
+
+    if questions:
+        head_id = str(questions[0].get("id") or "")
+        head_val = parsed.get(head_id)
+        if isinstance(head_val, str) and head_val.strip():
+            out["objective"] = head_val.strip()[:500]
+
+    if "tasks_per_day" in parsed:
+        try:
+            out["tasks_per_day"] = max(1, min(5, int(parsed["tasks_per_day"])))
+        except (TypeError, ValueError):
+            pass
+    elif answers.get("tasks_per_day"):
+        from todai.goal_planner.interrogation import parse_answer
+
+        r = parse_answer("tasks_per_day", str(answers["tasks_per_day"]))
+        if r.valid:
+            out["tasks_per_day"] = r.parsed
+
+    if "skip_days" in parsed and isinstance(parsed["skip_days"], list):
+        out["skip_days"] = [
+            int(d) for d in parsed["skip_days"] if isinstance(d, (int, float)) and 0 <= int(d) <= 6
+        ]
+    elif answers.get("skip_days") is not None and str(answers.get("skip_days")).strip():
+        r = parse_skip_days(str(answers["skip_days"]))
+        if r.valid:
+            out["skip_days"] = r.parsed
+
+    for qid, val in parsed.items():
+        if qid in ("outcome", "objective", "goal") and isinstance(val, str) and val.strip():
+            out["objective"] = val.strip()[:500]
+            break
+
+    return out
+
+def _build_intake_questions(clarifications: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One AI clarification + fixed tasks/day + skip days."""
+    head: dict[str, Any] | None = None
+    for q in clarifications or []:
+        if isinstance(q, dict) and q.get("text"):
+            head = {"id": str(q.get("id") or "outcome"), "text": str(q["text"]).strip()}
+            break
+        if isinstance(q, str) and q.strip():
+            head = {"id": "outcome", "text": q.strip()}
+            break
+    if not head:
+        head = dict(_FALLBACK_CLARIFICATION)
+    text = head["text"]
+    if "question 1 of 3" not in text.lower():
+        head = {**head, "text": f"**Question 1 of 3 — Your goal**\n{text.lstrip()}"}
+    return [head, *_FIXED_TAIL_QUESTIONS]
 
 
 def _answers_from_params(params: dict[str, Any], *, fallback_objective: str) -> dict[str, Any]:
@@ -292,18 +414,24 @@ def _answers_from_params(params: dict[str, Any], *, fallback_objective: str) -> 
     except (TypeError, ValueError):
         tpd = 1
     tpd = max(1, min(5, tpd))
-    try:
-        mins = int(params.get("minutes_per_day") or 45)
-    except (TypeError, ValueError):
-        mins = 45
-    mins = max(5, min(480, mins))
+    skip = params.get("skip_days")
+    if skip is None:
+        skip_list: list[int] = []
+        skip_display = format_skip_days([])
+    elif isinstance(skip, list):
+        skip_list = sorted({int(d) for d in skip if isinstance(d, (int, float)) and 0 <= int(d) <= 6})
+        skip_display = format_skip_days(skip_list)
+    else:
+        r = parse_skip_days(str(skip))
+        skip_list = list(r.parsed) if r.valid and isinstance(r.parsed, list) else []
+        skip_display = r.display or format_skip_days(skip_list)
 
     out: dict[str, Any] = {}
     for step, val, display in (
         ("objective", obj, obj[:80]),
-        ("difficulty", diff, diff),
         ("tasks_per_day", tpd, str(tpd)),
-        ("minutes_per_day", mins, f"{mins} minutes per day"),
+        ("skip_days", skip_list, skip_display),
+        ("difficulty", diff, diff),
     ):
         out[step] = {"valid": True, "parsed": val, "raw": str(val), "display": display}
     return out
@@ -312,15 +440,22 @@ def _answers_from_params(params: dict[str, Any], *, fallback_objective: str) -> 
 def _parse_init(raw: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
+    clarification = raw.get("clarification_question")
     questions = raw.get("questions")
-    if not isinstance(questions, list) or not questions:
-        return None
-    cleaned = []
-    for i, q in enumerate(questions):
-        if isinstance(q, dict) and q.get("text"):
-            cleaned.append({"id": str(q.get("id") or f"q{i + 1}"), "text": str(q["text"]).strip()})
-        elif isinstance(q, str) and q.strip():
-            cleaned.append({"id": f"q{i + 1}", "text": q.strip()})
+    cleaned: list[dict[str, str]] = []
+    if isinstance(clarification, dict) and clarification.get("text"):
+        cleaned.append(
+            {
+                "id": str(clarification.get("id") or "outcome"),
+                "text": str(clarification["text"]).strip(),
+            }
+        )
+    elif isinstance(questions, list):
+        for i, q in enumerate(questions[:1]):
+            if isinstance(q, dict) and q.get("text"):
+                cleaned.append({"id": str(q.get("id") or f"q{i + 1}"), "text": str(q["text"]).strip()})
+            elif isinstance(q, str) and q.strip():
+                cleaned.append({"id": f"q{i + 1}", "text": q.strip()})
     if not cleaned:
         return None
     defaults = raw.get("defaults") if isinstance(raw.get("defaults"), dict) else {}
@@ -329,6 +464,7 @@ def _parse_init(raw: dict[str, Any]) -> dict[str, Any] | None:
         "user_notes": str(raw.get("user_notes") or "").strip(),
         "analysis": str(raw.get("analysis") or "").strip(),
         "questions": cleaned,
+        "clarification_question": cleaned[0],
         "defaults": defaults,
     }
 

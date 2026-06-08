@@ -8,6 +8,12 @@ import json
 from datetime import date
 from typing import Any
 
+from todai.agent.routing.date_anchor import multi_resolved_weekday_isos
+from todai.agent.routing.preview_range import (
+    SCOPE_DISCRETE_DAYS,
+    build_discrete_preview_targets,
+    message_requests_discrete_day_preview,
+)
 from todai.agent.routing.preview_range import (
     AGENT_WINDOW_DAYS,
     agent_window_as_dict,
@@ -42,9 +48,21 @@ def slim_router_anchor(date_anchor: dict[str, Any] | None, *, today: date | None
     return out
 
 
-def slim_date_anchor_for_specialist(route: str, date_anchor: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not date_anchor or route == "chat":
+def slim_today_for_chat(date_anchor: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Minimal authoritative today for chat specialist (weekday + label)."""
+    if not date_anchor:
         return None
+    today = date_anchor.get("today")
+    if not today:
+        return None
+    return {"today": today}
+
+
+def slim_date_anchor_for_specialist(route: str, date_anchor: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not date_anchor:
+        return None
+    if route == "chat":
+        return slim_today_for_chat(date_anchor)
     if route in ("schedule_write", "schedule_delete"):
         slim = slim_router_anchor(date_anchor)
         if route == "schedule_write":
@@ -178,6 +196,18 @@ def build_turn_facts(
     except ValueError:
         today = date.today()
 
+    today_info = (date_anchor or {}).get("today") if date_anchor else None
+    if not today_info and today_s:
+        try:
+            d = date.fromisoformat(today_s[:10])
+            today_info = {
+                "iso": d.isoformat(),
+                "weekday": d.strftime("%A"),
+                "label": d.strftime("%A, %d %B %Y"),
+            }
+        except ValueError:
+            today_info = None
+
     facts: dict[str, Any] = {
         "intent": route,
         "user_message": (current_message or "").strip(),
@@ -185,6 +215,8 @@ def build_turn_facts(
         "last_agent_mode": last_agent_mode,
         "agent_window": agent_window_as_dict(today),
     }
+    if today_info:
+        facts["today"] = today_info
     if route != "chat" and user_request_outside_agent_window(
         current_message, today, date_anchor
     ):
@@ -238,6 +270,8 @@ def build_turn_facts(
     if route == "schedule_write":
         aw = facts["agent_window"]
         wk_cand = (date_anchor or {}).get("weekday_candidates") or {}
+        mentioned = (date_anchor or {}).get("mentioned_weekdays") or {}
+        resolved_isos = multi_resolved_weekday_isos(date_anchor)
         scope = facts.get("resolved_scope") or {}
         scope_from = str(scope.get("from") or "")[:10]
         scope_to = str(scope.get("to") or "")[:10]
@@ -249,8 +283,42 @@ def build_turn_facts(
             for opt in opts
             if (opt.get("iso") or "")[:10]
         }
+        try:
+            wtoday = date.fromisoformat(today_s[:10])
+        except ValueError:
+            wtoday = today
+        discrete_write = (
+            build_discrete_preview_targets(current_message, date_anchor, wtoday)
+            if date_anchor
+            else []
+        )
         day_rule = "use dates.mentioned_weekdays for day when set and unambiguous"
-        if pinned_day and (not wk_cand or pinned_day in cand_isos):
+        multi_target = ""
+        if len(discrete_write) >= 2:
+            facts["write_targets"] = [
+                {"weekday": t.weekday, "iso": t.iso, "label": t.label} for t in discrete_write
+            ]
+            iso_list = ", ".join(t.iso for t in discrete_write)
+            multi_target = (
+                f" Multi-target: write_targets lists {len(discrete_write)} specific days ({iso_list}) — "
+                "one add op per ISO with the user's title/times; do not add on other days in the span; "
+                "do not ask which date."
+            )
+            day_rule = "write_targets lists each target day — one add op per ISO only"
+        elif len(resolved_isos) >= 2 and not wk_cand:
+            facts["write_targets"] = [
+                {"weekday": k, "iso": str(v)[:10]}
+                for k, v in sorted(mentioned.items(), key=lambda kv: str(kv[1])[:10])
+            ]
+            iso_list = ", ".join(resolved_isos)
+            multi_target = (
+                f" Multi-target: dates.mentioned_weekdays resolves {len(resolved_isos)} days ({iso_list}) — "
+                "send one add op per listed ISO with the same title/times; do not ask which day."
+            )
+            day_rule = (
+                "dates.mentioned_weekdays lists each target day — one add op per ISO in write_targets"
+            )
+        elif pinned_day and (not wk_cand or pinned_day in cand_isos) and len(resolved_isos) < 2:
             facts["resolved_day"] = pinned_day
             day_rule = (
                 f"resolved_scope pins {pinned_day} ({scope.get('label', pinned_day)}) — "
@@ -258,20 +326,28 @@ def build_turn_facts(
                 "never claim a date is outside agent_window when it falls between "
                 f"agent_window.from and agent_window.to ({aw['from']}–{aw['to']})"
             )
-        elif wk_cand:
+        elif wk_cand and len(discrete_write) < 2:
             facts["weekday_candidates"] = wk_cand
             day_rule = (
                 "weekday_candidates means multiple dates match (e.g. two Fridays); "
                 "operations [] and ask which date (list each label); do not pick one yourself"
             )
         multi_day = ""
-        if scope.get("from") and scope.get("to") and scope.get("from") != scope.get("to"):
+        if (
+            scope.get("from")
+            and scope.get("to")
+            and scope.get("from") != scope.get("to")
+            and not multi_target
+            and scope.get("scope_mode") != "discrete_days"
+            and len(discrete_write) < 2
+        ):
             multi_day = (
                 f" Multi-day: user_message + resolved_scope ({scope.get('from')}–{scope.get('to')}) — "
                 "send one add op per calendar day in that range with the same title/times; "
                 "do not ask user to confirm."
             )
         facts["write_rules"] = (
+            "add op only — never remove unless user_message asks to delete/remove/cancel; "
             "add op: start/end ISO local times from user_message; "
             f"event date MUST be within agent_window ({aw['from']}–{aw['to']}, {AGENT_WINDOW_DAYS} days); "
             "if outside_agent_window, operations [] and explain you cannot save outside that range; "
@@ -279,6 +355,7 @@ def build_turn_facts(
             "before add, check schedule blocks in resolved_scope for the same day/time — "
             "if the slot overlaps an existing event, operations [] and name that event and its time; "
             "never ask user to confirm — emit add ops when details are clear."
+            + multi_target
             + multi_day
         )
     if route == "schedule_preview" and facts.get("outside_agent_window"):
@@ -298,13 +375,82 @@ def build_turn_facts(
             "Use free_time.days (date + free_gaps). Do not treat busy days as fully free. "
             "operations []. 1–2 short sentences."
         )
+    elif route == "schedule_preview" and preview_range:
+        scope_mode = str(preview_range.get("scope_mode") or "")
+        target_days = preview_range.get("target_days") or []
+        if scope_mode == "discrete_days" and target_days:
+            try:
+                ptoday = date.fromisoformat(today_s[:10])
+            except ValueError:
+                ptoday = today
+            discrete = build_discrete_preview_targets(current_message, date_anchor, ptoday)
+            facts["preview_scope_mode"] = "discrete_days"
+            facts["preview_targets"] = [
+                {"weekday": t.weekday, "iso": t.iso, "label": t.label} for t in discrete
+            ]
+            iso_list = ", ".join(target_days)
+            facts["preview_rules"] = (
+                f"User asked only for specific days ({iso_list}) — scope_mode discrete_days. "
+                "Reply with one short personalized line per preview_targets entry only; "
+                "mention that day's events or say nothing is scheduled. "
+                "Do NOT list other days between resolved_scope.from and resolved_scope.to. "
+                "schedule.blocks already filtered to target days. operations []."
+            )
+        elif preview_kind == PreviewReadKind.SCHEDULE and (date_anchor or {}).get(
+            "weekday_candidates"
+        ):
+            wk_cand = (date_anchor or {}).get("weekday_candidates") or {}
+            if wk_cand and not target_days:
+                facts["weekday_candidates"] = wk_cand
+                facts["preview_rules"] = (
+                    "weekday_candidates: ambiguous weekday — operations [] and ask which date "
+                    "(list each option label); do not guess."
+                )
+        elif preview_kind == PreviewReadKind.SCHEDULE:
+            facts["preview_rules"] = (
+                "User asked for a schedule overview in resolved_scope. "
+                "Summarize key events with day and time; do not dump a raw list of titles only. "
+                "Stay within resolved_scope. operations []. 2–4 short sentences max."
+            )
     if route == "schedule_delete":
-        del_rules = (
-            f"operations []. Say you can only remove events in the next {AGENT_WINDOW_DAYS} days."
-            if facts.get("outside_agent_window")
-            else "remove only events whose date falls in resolved_scope; "
-            "one named day → remove ops for that day only, not the whole week."
+        scope = facts.get("resolved_scope") or {}
+        scope_mode = str(scope.get("scope_mode") or "")
+        target_days = scope.get("target_days") or []
+        try:
+            dtoday = date.fromisoformat(today_s[:10])
+        except ValueError:
+            dtoday = today
+        discrete_delete = (
+            build_discrete_preview_targets(current_message, date_anchor, dtoday)
+            if date_anchor
+            else []
         )
+        if facts.get("outside_agent_window"):
+            del_rules = (
+                f"operations []. Say you can only remove events in the next {AGENT_WINDOW_DAYS} days."
+            )
+        elif len(discrete_delete) >= 2:
+            facts["delete_targets"] = [
+                {"weekday": t.weekday, "iso": t.iso, "label": t.label} for t in discrete_delete
+            ]
+            iso_list = ", ".join(t.iso for t in discrete_delete)
+            del_rules = (
+                f"User asked to delete only specific days ({iso_list}) — scope_mode discrete_days. "
+                "Remove events ONLY on delete_targets ISO dates; "
+                "do NOT remove events on other days between resolved_scope.from and resolved_scope.to. "
+                "schedule.blocks already filtered to target days."
+            )
+        elif scope_mode == "discrete_days" and target_days:
+            iso_list = ", ".join(str(d)[:10] for d in target_days)
+            del_rules = (
+                f"Remove events ONLY on target days ({iso_list}); "
+                "not on other days in the resolved span."
+            )
+        else:
+            del_rules = (
+                "remove only events whose date falls in resolved_scope; "
+                "one named day → remove ops for that day only, not the whole week."
+            )
         facts["delete_rules"] = del_rules
     return facts
 
@@ -322,20 +468,26 @@ def build_router_user_context_slim(
             today = date.fromisoformat(str(server_snapshot.get("server_date_utc", ""))[:10])
         except ValueError:
             today = None
+    hints: dict[str, Any] = {
+        "dates": slim_router_anchor(date_anchor, today=today),
+        "last_agent_mode": conversation.get("last_agent_mode"),
+    }
+    if date_anchor:
+        if date_anchor.get("day_targets"):
+            hints["day_targets"] = date_anchor.get("day_targets")
+        if message_requests_discrete_day_preview(current_message, date_anchor):
+            hints["suggested_time_scope"] = SCOPE_DISCRETE_DAYS
+            hints["preview_intent"] = "discrete_days"
+            hints["calendar_intent"] = "discrete_days"
+        elif len((date_anchor.get("day_targets") or [])) == 1:
+            hints["suggested_time_scope"] = "single_day"
     return (
         "CURRENT_USER_MESSAGE:\n"
         + (current_message or "").strip()
         + "\n\nROUTING_HINTS:\n"
-        + json.dumps(
-            {
-                "dates": slim_router_anchor(date_anchor, today=today),
-                "last_agent_mode": conversation.get("last_agent_mode"),
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-            default=str,
-        )
-        + "\n\nRespond with JSON only (route + time_scope + tool names). No dates in tools. No user reply text."
+        + json.dumps(hints, ensure_ascii=False, separators=(",", ":"), default=str)
+        + "\n\nRespond with JSON only (route + time_scope + tool names). "
+        "Prefer suggested_time_scope when set. No dates in tools. No user reply text."
     )
 
 

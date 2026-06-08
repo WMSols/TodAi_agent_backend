@@ -16,6 +16,8 @@ from todai.agent.tools.calendar import CalendarService, apply_operations_direct,
 from todai.agent.tools.scheduling import find_conflicts_for_operation
 from todai.database.storage import UserStore
 
+_DELETE_VERBS = re.compile(r"\b(remove|delete|cancel|clear)\b", re.I)
+
 # Reply heuristics (kept here so planner/llm can import without pulling the orchestrator).
 _CLARIFY_MARKERS = re.compile(
     r"\?|"
@@ -101,6 +103,17 @@ def validate_add_in_scope(
     try:
         start_day = parse_iso_dt(str(op.get("start") or "")).date().isoformat()
     except ValueError:
+        return []
+    target_days = resolved_scope.get("target_days") or []
+    if resolved_scope.get("scope_mode") == "discrete_days" and target_days:
+        allowed = {str(d)[:10] for d in target_days if str(d)[:10]}
+        if start_day not in allowed:
+            return [
+                {
+                    "code": "OUT_OF_SCOPE",
+                    "detail": f"event date {start_day} not in target_days {sorted(allowed)}",
+                }
+            ]
         return []
     if start_day < scope_from or start_day > scope_to:
         return [
@@ -201,6 +214,10 @@ def _remove_op_in_scope(
         day = parse_iso_dt(str(blk.get("start") or "")).date().isoformat()
     except ValueError:
         return False
+    target_days = resolved_scope.get("target_days") or []
+    if resolved_scope.get("scope_mode") == "discrete_days" and target_days:
+        allowed = {str(d)[:10] for d in target_days if str(d)[:10]}
+        return day in allowed
     return fr <= day <= to
 
 
@@ -221,6 +238,11 @@ def filter_operations_for_apply(
     slot_conflict_detail: dict[str, Any] | None = None
     had_time_errors = False
     for op in operations:
+        kind = str(op.get("op") or "").lower()
+        if route == "schedule_write" and kind == "remove" and not _DELETE_VERBS.search(
+            user_message or ""
+        ):
+            continue
         errs = (
             validate_add_time_range(op, user_message=user_message, resolved_scope=resolved_scope)
             if route == "schedule_write"

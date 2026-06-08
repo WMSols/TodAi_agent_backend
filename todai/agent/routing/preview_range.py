@@ -146,17 +146,27 @@ _FIRST_WEEK_OF_MONTH = re.compile(rf"\bfirst\s+week\s+of\s+({_MONTH_NAME_PATTERN
 
 
 @dataclass(frozen=True)
+class PreviewTarget:
+    """One calendar day the user asked about (discrete preview)."""
+    weekday: str
+    iso: str
+    label: str
+
+
+@dataclass(frozen=True)
 class PreviewRange:
     date_from: str
     date_to: str
     label: str
-    granularity: str  # day | week | month
+    granularity: str  # day | week | month | discrete_days
     explicit: bool
     fill_empty_days: bool = True
     show_free_banners: bool = False
+    scope_mode: str = "range"  # range | discrete_days
+    target_days: tuple[str, ...] | None = None
 
-    def as_dict(self) -> dict[str, str | bool]:
-        return {
+    def as_dict(self) -> dict[str, str | bool | list[str]]:
+        out: dict[str, str | bool | list[str]] = {
             "from": self.date_from,
             "to": self.date_to,
             "label": self.label,
@@ -164,7 +174,11 @@ class PreviewRange:
             "explicit": self.explicit,
             "fill_empty_days": self.fill_empty_days,
             "show_free_banners": self.show_free_banners,
+            "scope_mode": self.scope_mode,
         }
+        if self.target_days:
+            out["target_days"] = list(self.target_days)
+        return out
 
 
 def _day_label(d: date) -> str:
@@ -251,6 +265,11 @@ def clamp_preview_range(
     if clamped_start != req_start or clamped_end != req_end:
         label = f"{clamped_start.strftime('%d %b')} – {clamped_end.strftime('%d %b %Y')} (within {AGENT_WINDOW_DAYS}-day window)"
 
+    clamped_targets = scope.target_days
+    if scope.target_days:
+        win_s, win_e = clamped_start.isoformat(), clamped_end.isoformat()
+        kept = tuple(d for d in scope.target_days if win_s <= d <= win_e)
+        clamped_targets = kept if kept else None
     return PreviewRange(
         date_from=clamped_start.isoformat(),
         date_to=clamped_end.isoformat(),
@@ -259,6 +278,8 @@ def clamp_preview_range(
         explicit=scope.explicit,
         fill_empty_days=scope.fill_empty_days,
         show_free_banners=scope.show_free_banners,
+        scope_mode=scope.scope_mode,
+        target_days=clamped_targets,
     )
 
 
@@ -536,7 +557,9 @@ def apply_preview_range_to_tools(
     preview: PreviewRange,
 ) -> list[dict[str, Any]]:
     """Align all range read tools to the resolved preview window."""
-    want = {"from": preview.date_from, "to": preview.date_to}
+    want: dict[str, Any] = {"from": preview.date_from, "to": preview.date_to}
+    if preview.scope_mode == "discrete_days" and preview.target_days:
+        want["target_days"] = list(preview.target_days)
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for call in tool_calls:
@@ -553,8 +576,13 @@ def apply_preview_range_to_tools(
 # --- Router time_scope ---
 
 from todai.agent.routing.date_anchor import (
+    day_target_isos,
+    message_has_coming_named_weekday,
+    message_has_named_weekday_target,
     message_has_next_named_weekday,
+    message_has_this_named_weekday,
     message_has_whole_week_phrase,
+    multi_resolved_weekday_isos,
     single_day_iso_from_anchor,
 )
 
@@ -564,7 +592,9 @@ _WEEKDAY_IN_MESSAGE = re.compile(
 )
 _BOTH_WORDS = re.compile(r"\b(?:both|all\s+of\s+them)\b", re.I)
 _MULTI_WEEKDAY_PHRASE = re.compile(
-    r"\bthis\s+\w+day\s+and\s+next\s+\w+day\b|\band\s+next\s+\w+day\b|\b\w+day\s+and\s+\w+day\b",
+    r"\bthis\s+\w+day\s+and\s+(?:next\s+|coming\s+)?\w+day\b"
+    r"|\band\s+(?:next\s+|coming\s+)\w+day\b"
+    r"|\b\w+day\s+and\s+(?:next\s+|coming\s+)?\w+day\b",
     re.I,
 )
 
@@ -575,6 +605,7 @@ SCOPE_TOMORROW = "tomorrow"
 SCOPE_THIS_WEEK = "this_week"
 SCOPE_NEXT_WEEK = "next_week"
 SCOPE_SINGLE_DAY = "single_day"
+SCOPE_DISCRETE_DAYS = "discrete_days"
 SCOPE_FREE_DAYS = "free_days"
 SCOPE_FREE_TIME = "free_time"
 
@@ -595,6 +626,10 @@ _ALIASES: dict[str, str] = {
     "single_day": SCOPE_SINGLE_DAY,
     "single day": SCOPE_SINGLE_DAY,
     "day": SCOPE_SINGLE_DAY,
+    "discrete_days": SCOPE_DISCRETE_DAYS,
+    "discrete days": SCOPE_DISCRETE_DAYS,
+    "multi_day": SCOPE_DISCRETE_DAYS,
+    "multi day": SCOPE_DISCRETE_DAYS,
     "free_days": SCOPE_FREE_DAYS,
     "free days": SCOPE_FREE_DAYS,
     "free_time": SCOPE_FREE_TIME,
@@ -691,6 +726,8 @@ def _scope_from_keyword(
         return _next_calendar_week(today)
     if keyword in (SCOPE_FREE_DAYS, SCOPE_FREE_TIME):
         return clamp_preview_range(_week_default(today), today)
+    if keyword == SCOPE_DISCRETE_DAYS:
+        return None
     if keyword == SCOPE_SINGLE_DAY:
         mentioned = anchor.get("mentioned_weekdays") or {}
         if len(mentioned) == 1:
@@ -720,7 +757,13 @@ def message_implies_multi_weekday_scope(
     message: str,
     date_anchor: dict[str, Any] | None,
 ) -> bool:
-    """User wants more than one date from weekday_candidates (e.g. both Wednesdays)."""
+    """User wants more than one date (candidates or multiple resolved mentioned_weekdays)."""
+    if len(multi_resolved_weekday_isos(date_anchor)) >= 2:
+        msg = message or ""
+        if _BOTH_WORDS.search(msg) or _MULTI_WEEKDAY_PHRASE.search(msg):
+            return True
+        if message_has_named_weekday_target(msg) and _WEEKDAY_IN_MESSAGE.search(msg):
+            return True
     isos = _weekday_candidate_isos(date_anchor)
     if len(isos) < 2:
         return False
@@ -737,6 +780,163 @@ def scope_from_weekday_candidates(
     today: date,
 ) -> PreviewRange | None:
     isos = _weekday_candidate_isos(date_anchor)
+    if len(isos) < 2:
+        return None
+    return _scope_from_iso_span(isos, today)
+
+
+def scope_from_mentioned_weekdays(
+    date_anchor: dict[str, Any] | None,
+    today: date,
+) -> PreviewRange | None:
+    """Span min–max when mentioned_weekdays resolved 2+ distinct days (e.g. coming sunday + next thursday)."""
+    isos = multi_resolved_weekday_isos(date_anchor)
+    if len(isos) < 2:
+        return None
+    return _scope_from_iso_span(isos, today)
+
+
+def _weekday_keys_in_message(message: str) -> set[str]:
+    """Canonical weekday names (lowercase) mentioned in the message."""
+    keys: set[str] = set()
+    for match in _WEEKDAY_IN_MESSAGE.finditer(message or ""):
+        raw = match.group(0).lower()
+        idx = {
+            "monday": "monday", "mon": "monday",
+            "tuesday": "tuesday", "tue": "tuesday", "tues": "tuesday",
+            "wednesday": "wednesday", "wed": "wednesday",
+            "thursday": "thursday", "thu": "thursday", "thur": "thursday", "thurs": "thursday",
+            "friday": "friday", "fri": "friday",
+            "saturday": "saturday", "sat": "saturday",
+            "sunday": "sunday", "sun": "sunday",
+        }.get(raw)
+        if idx:
+            keys.add(idx)
+    return keys
+
+
+def message_requests_discrete_day_preview(
+    message: str,
+    date_anchor: dict[str, Any] | None,
+) -> bool:
+    """User named 2+ specific weekdays (same or different weeks) — not a full-week ask."""
+    if message_has_whole_week_phrase(message):
+        return False
+    day_targets = (date_anchor or {}).get("day_targets") or []
+    if len(day_targets) >= 2 and len(day_target_isos(date_anchor)) >= 2:
+        return True
+    if message_implies_multi_weekday_scope(message, date_anchor):
+        return True
+    if len(multi_resolved_weekday_isos(date_anchor)) >= 2:
+        return True
+    msg = message or ""
+    if message_has_named_weekday_target(msg) and _MULTI_WEEKDAY_PHRASE.search(msg):
+        return True
+    asked = _weekday_keys_in_message(msg)
+    if len(asked) >= 2:
+        if _MULTI_WEEKDAY_PHRASE.search(msg) or _BOTH_WORDS.search(msg):
+            return True
+        if re.search(r"\band\b", msg, re.I):
+            return True
+    return False
+
+
+def build_discrete_preview_targets(
+    message: str,
+    date_anchor: dict[str, Any] | None,
+    today: date,
+) -> list[PreviewTarget]:
+    """
+    One ISO per weekday the user asked about (resolved or nearest candidate).
+    Does not widen to intermediate calendar days between targets.
+    """
+    if not message_requests_discrete_day_preview(message, date_anchor):
+        return []
+    anchor = date_anchor or {}
+    day_targets = anchor.get("day_targets") or []
+    if len(day_targets) >= 2 and len(day_target_isos(date_anchor)) >= 2:
+        out: list[PreviewTarget] = []
+        seen: set[str] = set()
+        for t in day_targets:
+            iso = str(t.get("iso") or "")[:10]
+            if len(iso) != 10 or iso in seen:
+                continue
+            seen.add(iso)
+            out.append(
+                PreviewTarget(
+                    str(t.get("weekday") or ""),
+                    iso,
+                    str(t.get("label") or iso),
+                )
+            )
+        if len(out) >= 2:
+            return out
+
+    mentioned = anchor.get("mentioned_weekdays") or {}
+    candidates = anchor.get("weekday_candidates") or {}
+    asked = _weekday_keys_in_message(message)
+    targets: list[PreviewTarget] = []
+
+    for wd in sorted(asked):
+        iso = str(mentioned.get(wd) or "")[:10]
+        if len(iso) == 10:
+            try:
+                d = date.fromisoformat(iso)
+                targets.append(PreviewTarget(wd, iso, d.strftime("%A, %d %B %Y")))
+            except ValueError:
+                pass
+            continue
+        opts = candidates.get(wd)
+        if isinstance(opts, list) and opts:
+            picked = pick_nearest_weekday_option(opts, today)
+            if picked:
+                try:
+                    d = date.fromisoformat(picked[:10])
+                    targets.append(PreviewTarget(wd, picked[:10], d.strftime("%A, %d %B %Y")))
+                except ValueError:
+                    pass
+
+    seen: set[str] = set()
+    unique: list[PreviewTarget] = []
+    for t in sorted(targets, key=lambda x: x.iso):
+        if t.iso in seen:
+            continue
+        seen.add(t.iso)
+        unique.append(t)
+    return unique
+
+
+def preview_range_from_discrete_targets(
+    targets: list[PreviewTarget],
+    today: date,
+) -> PreviewRange | None:
+    if len(targets) < 2:
+        return None
+    isos = [t.iso for t in targets]
+    try:
+        d0 = date.fromisoformat(isos[0])
+        d1 = date.fromisoformat(isos[-1])
+    except ValueError:
+        return None
+    if len(targets) == 2:
+        label = f"{targets[0].label} · {targets[1].label}"
+    else:
+        label = f"{d0.strftime('%A %d %b')} – {d1.strftime('%A %d %b %Y')} ({len(targets)} days)"
+    scope = PreviewRange(
+        date_from=d0.isoformat(),
+        date_to=d1.isoformat(),
+        label=label,
+        granularity="discrete_days",
+        explicit=True,
+        fill_empty_days=True,
+        show_free_banners=False,
+        scope_mode="discrete_days",
+        target_days=tuple(isos),
+    )
+    return clamp_preview_range(scope, today)
+
+
+def _scope_from_iso_span(isos: list[str], today: date) -> PreviewRange | None:
     if len(isos) < 2:
         return None
     try:
@@ -761,11 +961,22 @@ def message_implies_single_day(
     date_anchor: dict[str, Any] | None,
 ) -> bool:
     """True when user targets one calendar day (not a full week phrase)."""
+    if message_requests_discrete_day_preview(message, date_anchor):
+        return False
     if message_implies_multi_weekday_scope(message, date_anchor):
+        return False
+    day_targets = (date_anchor or {}).get("day_targets") or []
+    if len(day_targets) >= 2:
+        return False
+    if len(multi_resolved_weekday_isos(date_anchor)) >= 2:
         return False
     if message_has_whole_week_phrase(message):
         return False
-    if message_has_next_named_weekday(message):
+    if (
+        message_has_next_named_weekday(message)
+        or message_has_coming_named_weekday(message)
+        or message_has_this_named_weekday(message)
+    ):
         return True
     if single_day_iso_from_anchor(date_anchor):
         if _WEEKDAY_IN_MESSAGE.search(message or "") or re.search(
@@ -786,6 +997,9 @@ def refine_scope_for_message(
 ) -> PreviewRange:
     """Prefer one-day scope when message names a day but router sent a week keyword."""
     if message_implies_multi_weekday_scope(message, date_anchor):
+        multi = scope_from_mentioned_weekdays(date_anchor, today)
+        if multi:
+            return multi
         multi = scope_from_weekday_candidates(date_anchor, today)
         if multi:
             return multi
@@ -831,8 +1045,48 @@ def resolve_preview_range_for_turn(
     return scope
 
 
-def infer_time_scope_from_message(message: str) -> str:
+def align_router_time_scope(
+    message: str,
+    date_anchor: dict[str, Any] | None,
+    route: str,
+    time_scope: str,
+) -> str:
+    """Align router time_scope with code-resolved day targets (calendar routes)."""
+    scope = normalize_time_scope(time_scope)
+    if route not in ("schedule_preview", "schedule_delete", "schedule_write"):
+        return scope
+    if message_requests_discrete_day_preview(message, date_anchor):
+        return SCOPE_DISCRETE_DAYS
+    day_targets = (date_anchor or {}).get("day_targets") or []
+    if len(day_targets) == 1:
+        return SCOPE_SINGLE_DAY
+    if len(multi_resolved_weekday_isos(date_anchor)) == 1 and (
+        message_has_named_weekday_target(message) or single_day_iso_from_anchor(date_anchor)
+    ):
+        return SCOPE_SINGLE_DAY
+    if route == "schedule_preview":
+        kind = classify_preview_read(message)
+        if kind == PreviewReadKind.FREE_DAYS:
+            return SCOPE_FREE_DAYS
+        if kind == PreviewReadKind.FREE_TIME:
+            return SCOPE_FREE_TIME
+    return scope
+
+
+def infer_time_scope_from_message(
+    message: str,
+    date_anchor: dict[str, Any] | None = None,
+) -> str:
     """Heuristic for mock router / tests."""
+    if date_anchor and message_requests_discrete_day_preview(message, date_anchor):
+        return SCOPE_DISCRETE_DAYS
+    msg = message or ""
+    if (
+        len(_weekday_keys_in_message(msg)) >= 2
+        and (_MULTI_WEEKDAY_PHRASE.search(msg) or _BOTH_WORDS.search(msg))
+        and not message_has_whole_week_phrase(message)
+    ):
+        return SCOPE_DISCRETE_DAYS
     m = (message or "").lower()
     if message_has_whole_week_phrase(message) and not message_has_next_named_weekday(message):
         if any(
@@ -848,7 +1102,7 @@ def infer_time_scope_from_message(message: str) -> str:
             return SCOPE_NEXT_WEEK
         if "this week" in m:
             return SCOPE_THIS_WEEK
-    if message_has_next_named_weekday(message):
+    if message_has_named_weekday_target(message):
         return SCOPE_SINGLE_DAY
     if _WEEKDAY_IN_MESSAGE.search(message or "") and not message_has_whole_week_phrase(message):
         return SCOPE_SINGLE_DAY

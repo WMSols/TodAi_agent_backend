@@ -91,7 +91,7 @@ def parse_router_output(raw: dict[str, Any]) -> tuple[RouterOutput | None, list[
 ROUTER_JSON_CONTRACT = (
     'JSON only: {"route": string, "time_scope": string, "tools": array}\n'
     "route: chat | schedule_preview | schedule_write | schedule_delete\n"
-    "time_scope: default | today | tomorrow | this_week | next_week | single_day | free_days | free_time\n"
+    "time_scope: default | today | tomorrow | this_week | next_week | single_day | discrete_days | free_days | free_time\n"
     'tools: ["get_schedule_range"] or [{"tool":"get_schedule_range"}]; NO from/to in tools.\n'
     "Tools: get_schedule_range, get_free_time, get_days_without_schedule, get_active_goals\n"
 )
@@ -102,7 +102,9 @@ ROUTER_TIME_SCOPE_RULES = (
     "today — today's schedule; tomorrow — tomorrow only;\n"
     "this_week — rest of current calendar week (today→Sun);\n"
     "next_week — FULL next Mon–Sun only (next week|next all week|coming week|add every day next week);\n"
-    "single_day — ONE day: on/for weekday, ISO date, next monday|next saturday (NOT next_week);\n"
+    "single_day — ONE day: on/for weekday, ISO date, next monday|this sunday (NOT next_week);\n"
+    "discrete_days — TWO+ named days (monday and sunday, this sunday and coming sunday); "
+    "tools [get_schedule_range] only — NO dates in tools;\n"
     "free_days + get_days_without_schedule — days with zero events;\n"
     "free_time + get_free_time — gap slots; default — vague/all/upcoming/what's on (14d window).\n"
 )
@@ -114,7 +116,8 @@ ROUTER_SYSTEM = (
     + ROUTER_TIME_SCOPE_RULES
     + "chat: tools [], time_scope default. preview: read calendar. write: add/move/time. delete: remove.\n"
     "Goals (create/delete/7-day plans/list goals): user uses Goal planner tab, not calendar.\n"
-    "Do not use next_week for next <weekday> alone. Output JSON only.\n"
+    "Do not use next_week for next <weekday> alone. "
+    "Use discrete_days (not single_day) when user names two or more specific days. Output JSON only.\n"
 )
 
 SPECIALIST_JSON_CONTRACT = (
@@ -129,15 +132,19 @@ SPECIALIST_JSON_CONTRACT = (
 SPECIALIST_SYSTEM_CHAT = (
     "TodAI chat. operations []. Put greeting/answer in replyText JSON field; "
     "use conversation for tone only. Do not claim calendar saves unless user asks about scheduling.\n"
+    "For today's date or weekday, use ONLY TURN_FACTS.today or TURN_FACTS.dates.today "
+    "(iso, weekday, label) — never guess from the ISO string alone.\n"
 )
 
 SPECIALIST_SYSTEM_PREVIEW = (
     f"TodAI preview. operations []. Only the next {AGENT_WINDOW_DAYS} days from server_today (agent_window) exist for you. "
-    "Follow preview_read_kind and preview_rules in TURN_FACTS. "
+    "Follow preview_read_kind, preview_scope_mode, preview_targets, and preview_rules in TURN_FACTS. "
+    "When preview_scope_mode is discrete_days, answer ONLY for preview_targets — never other days in the range. "
     "days_without_schedule = whole days with zero events; free_time = gap slots on busy days. "
     "If outside_agent_window is true, operations [] and say clearly you cannot view or change dates outside that window. "
     "If schedule.empty is true, say nothing is scheduled in that period. Do not invent events. "
-    "UI shows the table — reply 1–2 short sentences; for free_days list only days from days_without_schedule.days.\n"
+    "UI shows the table — reply 1–2 short sentences unless discrete_days (then one line per preview_targets day). "
+    "For free_days list only days from days_without_schedule.days.\n"
 )
 
 SPECIALIST_SYSTEM_WRITE = (
@@ -147,7 +154,10 @@ SPECIALIST_SYSTEM_WRITE = (
     "operations [] only when something is missing or ambiguous; then ask once for that detail. "
     "If outside_agent_window is true, operations [] and say you cannot add outside agent_window. "
     "If weekday_candidates is set, operations [] and ask which date (list options). "
-    "Use dates.mentioned_weekdays only when exactly one day is resolved. "
+    "When write_targets is set, one add op per listed ISO only — never add on other days in the span. "
+    "Add ops only — never remove unless user asked to delete/remove/cancel. "
+    "Use dates.mentioned_weekdays: one key → one add op; multiple keys → one add op per ISO "
+    "(same title/times); follow write_rules and write_targets in TURN_FACTS when set. "
     "start and end must be ISO datetimes (YYYY-MM-DDTHH:MM:SS) matching user_message times "
     "(9 am → T09:00:00, not midnight). end after start. "
     "Each event day must be within resolved_scope or agent_window. "
@@ -157,9 +167,9 @@ SPECIALIST_SYSTEM_WRITE = (
 
 SPECIALIST_SYSTEM_DELETE = (
     f"TodAI delete. Only the next {AGENT_WINDOW_DAYS} days (agent_window). "
-    "Match event_index + schedule. resolved_scope is the day or range to act on — "
-    "remove only events on that day when scope is one day; do not remove other days in prefetch. "
-    "Ambiguous weekday → ops [] and ask which date. Clear match → remove op(s) only for that scope.\n"
+    "Match event_index + schedule + delete_rules. When delete_targets or target_days is set, "
+    "remove only events on those ISO dates — not other days between resolved_scope from/to. "
+    "Ambiguous weekday → ops [] and ask which date. Clear match → remove op(s) only for delete_targets.\n"
 )
 
 # --- Legacy prompts (backup — pre token optimization) ---

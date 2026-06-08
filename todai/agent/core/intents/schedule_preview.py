@@ -8,11 +8,13 @@ schedule_preview.py — intent: show / preview what's on the calendar
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from todai.agent.core.goal_overlay import build_schedule_display_with_goals
 from todai.agent.core.intents._shared import run_specialist
 from todai.agent.core.groq_errors import specialist_groq_failed
 from todai.agent.core.schedule_display import (
+    _empty_day_row,
     build_free_days_period_reply,
     build_grounded_preview_reply,
     build_period_preview_reply,
@@ -53,6 +55,22 @@ def handle(ctx: TurnContext) -> IntentResult:
         title=preview.label,
         show_free_banners=preview.show_free_banners,
     )
+    if display and preview.scope_mode == "discrete_days" and preview.target_days:
+        allowed = set(preview.target_days)
+        days = display.get("days") or []
+        by_date = {str(d.get("date", ""))[:10]: d for d in days}
+        from datetime import date as date_cls, datetime, time
+
+        filtered: list[dict[str, Any]] = []
+        for day_iso in preview.target_days:
+            if day_iso in by_date:
+                filtered.append(by_date[day_iso])
+            else:
+                try:
+                    filtered.append(_empty_day_row(datetime.combine(date_cls.fromisoformat(day_iso), time.min)))
+                except ValueError:
+                    continue
+        display = {**display, "days": filtered, "period": {"from": preview.target_days[0], "to": preview.target_days[-1]}}
     if display and display.get("days"):
         ctx.trace.append({"phase": "goal_overlay", "merged": True})
 
